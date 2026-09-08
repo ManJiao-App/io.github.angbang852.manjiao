@@ -22,7 +22,7 @@
 gradlew assembleDebug
 ```
 
-需 Android SDK + NDK 26+。
+需 Android SDK + NDK 26+
 
 ## 使用
 
