@@ -1,4 +1,4 @@
 minApiVersion=102
 targetApiVersion=102
 staticScope=true
-updateJsonUrl=https://github.com/ManJiao-App/ManJiao/raw/main/update.json
+updateJsonUrl=https://github.com/ManJiao-App/com.manjiao.assistant/raw/main/update.json
