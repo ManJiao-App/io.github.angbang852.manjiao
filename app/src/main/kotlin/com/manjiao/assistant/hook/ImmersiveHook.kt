@@ -304,10 +304,7 @@ object ImmersiveHook {
             val isLeftMid = left < w * 40 / 100 && top in (h * 10 / 100)..(h * 75 / 100)
             if (!isRight && !isBottom && !isLeftMid) return@walk
             val cn = v.javaClass.simpleName
-            val idName = try {
-                val rid = v.id
-                if (rid != View.NO_ID) v.resources.getResourceEntryName(rid) else ""
-            } catch (_: Throwable) { "" }
+            val idName = idNameOf(v)
             val b = "[$left,$top][$right,$bottom]"
             val t = if (v is TextView) v.text?.toString()?.take(15) ?: "" else ""
             Logger.d("imm remain $cn $b${if (idName.isNotEmpty()) " id=$idName" else ""}${if (t.isNotEmpty()) " t=$t" else ""}")
@@ -320,7 +317,7 @@ object ImmersiveHook {
         // 代码覆盖，依赖 STRIP_TAG 找回会造成文字永久消失（只剩图标）
         walkAll(root) { v ->
             if (v.id != View.NO_ID) {
-                val idName = try { v.resources.getResourceEntryName(v.id) } catch (_: Throwable) { "" }
+                val idName = idNameOf(v)
                 if (idName == "kcube_tab_strip") {
 
                     v.tag = null
@@ -365,7 +362,7 @@ object ImmersiveHook {
             v.getLocationOnScreen(loc)
             val absY = loc[1]; val absX = loc[0]
             if (absY >= h / 4) return@walkAll
-            val idName = try { val rid = v.id; if (rid != View.NO_ID) v.resources.getResourceEntryName(rid) else "" } catch (_: Throwable) { "" }
+            val idName = idNameOf(v)
             if (idName == "kcube_tab_strip" && v.tag !== STRIP_TAG) {
                 v.setWillNotDraw(true)
                 v.tag = STRIP_TAG
@@ -401,7 +398,7 @@ object ImmersiveHook {
             val absY = loc[1]; val absX = loc[0]
             val t = if (v is TextView) v.text?.toString() ?: "" else ""
             val cd = v.contentDescription?.toString() ?: ""
-            val idName = try { val rid = v.id; if (rid != View.NO_ID) v.resources.getResourceEntryName(rid) else "" } catch (_: Throwable) { "" }
+            val idName = idNameOf(v)
             if (t.isBlank() && cd.isBlank() && idName.isBlank()) return@walkAll
             val ft = fixStr(t); val fcd = fixStr(cd)
             Logger.d("imm tb y=$absY x=$absX vis=${v.visibility} cls=${v.javaClass.simpleName} w=${v.width} h=${v.height}${if (idName.isNotEmpty()) " id=$idName" else ""}${if (ft.isNotEmpty()) " t=$ft" else ""}${if (fcd.isNotEmpty()) " cd=$fcd" else ""}${if (v is ViewGroup) " kids=${v.childCount}" else ""}")
@@ -421,16 +418,25 @@ object ImmersiveHook {
         return false
     }
 
+    private val idNameCache = android.util.SparseArray<String>()
+
+    /** id->资源名缓存：每轮全树遍历数百 view 的 getResourceEntryName 是主线程最大开销（缓存后 int 查表） */
+    private fun idNameOf(v: View): String {
+        val rid = v.id
+        if (rid == View.NO_ID) return ""
+        val c = idNameCache.get(rid)
+        if (c != null) return c
+        val n = try { v.resources.getResourceEntryName(rid) } catch (_: Throwable) { "" }
+        idNameCache.put(rid, n)
+        return n
+    }
     private fun hideByIds(root: ViewGroup, force: Boolean): Int {
         var count = 0
         walk(root) { v ->
             if (v === root) return@walk
             if (v.visibility != View.VISIBLE) return@walk
             if (isVideoView(v)) return@walk
-            val idName = try {
-                val rid = v.id
-                if (rid != View.NO_ID) v.resources.getResourceEntryName(rid) else ""
-            } catch (_: Throwable) { "" }
+            val idName = idNameOf(v)
             for (key in HIDE_IDS) {
                 if (idName == key || idName.contains(key, true)) {
                     if (hide(v, force)) count++; break
@@ -504,7 +510,7 @@ object ImmersiveHook {
         val text = if (v is TextView) v.text?.toString() else null
         val cd = v.contentDescription?.toString()
         val t = text ?: fixStr(cd ?: "")
-        val idName = try { val rid = v.id; if (rid != View.NO_ID) v.resources.getResourceEntryName(rid) else "" } catch (_: Throwable) { "" }
+        val idName = idNameOf(v)
         v.getLocationOnScreen(loc)
         val absX = loc[0]; val absY = loc[1]
         if (absY >= h || absY + v.height <= 0) return null
@@ -561,18 +567,33 @@ object ImmersiveHook {
         val any: Boolean get() = top.isNotEmpty() || right.isNotEmpty() || other.isNotEmpty()
     }
 
+    @Volatile private var setsCache: CustomSets? = null
+    @Volatile private var setsCacheSig = -1
+
+    /** 结果缓存：hideByConfig 每轮（250ms~1.5s）重建 sets+打日志是重复开销；sig 含开关值与集合 hash，变化才重建 */
     private fun buildCustomSets(): CustomSets {
-        val top = mutableSetOf<String>()
-        val right = mutableSetOf<String>()
+        val topOn = Prefs.bool(Prefs.K_IMM_TOPBAR_ON, false)
+        val rightOn = Prefs.bool(Prefs.K_IMM_RIGHT_ON, false)
+        val nickOn = Prefs.bool(Prefs.K_IMM_NICKNAME, false)
+        val collOn = Prefs.bool(Prefs.K_IMM_COLLECTION, false)
+        val botOn = Prefs.bool(Prefs.K_IMM_BOTTOM_BAR, false)
+        val goldOn = Prefs.bool(Prefs.K_IMM_GOLD, false)
+        val top = if (topOn) Prefs.strSet(Prefs.K_IMM_TOPBAR).toSet() else emptySet()
+        val right = if (rightOn) Prefs.strSet(Prefs.K_IMM_RIGHT_ITEMS).toSet() else emptySet()
+        val sig = (if (topOn) 1 else 0) + (if (rightOn) 2 else 0) + (if (nickOn) 4 else 0) +
+            (if (collOn) 8 else 0) + (if (botOn) 16 else 0) + (if (goldOn) 32 else 0) +
+            top.hashCode() * 31 + right.hashCode()
+        val c = setsCache
+        if (c != null && setsCacheSig == sig) return c
         val other = mutableSetOf<String>()
-        if (Prefs.bool(Prefs.K_IMM_TOPBAR_ON, false)) top.addAll(Prefs.strSet(Prefs.K_IMM_TOPBAR))
-        if (Prefs.bool(Prefs.K_IMM_RIGHT_ON, false)) right.addAll(Prefs.strSet(Prefs.K_IMM_RIGHT_ITEMS))
-        if (Prefs.bool(Prefs.K_IMM_NICKNAME, false)) { other.add("作者昵称"); other.add("视频文案") }
-        if (Prefs.bool(Prefs.K_IMM_COLLECTION, false)) other.add("合集")
-        if (Prefs.bool(Prefs.K_IMM_BOTTOM_BAR, false)) other.add("底部Tab栏")
-        if (Prefs.bool(Prefs.K_IMM_GOLD, false)) other.add("金币红包")
-        Logger.d("imm sets top=$top right=$right other=$other gold=${Prefs.bool(Prefs.K_IMM_GOLD, false)}")
-        return CustomSets(top, right, other)
+        if (nickOn) { other.add("作者昵称"); other.add("视频文案") }
+        if (collOn) other.add("合集")
+        if (botOn) other.add("底部Tab栏")
+        if (goldOn) other.add("金币红包")
+        val s = CustomSets(top, right, other)
+        setsCache = s; setsCacheSig = sig
+        Logger.d("imm sets top=$top right=$right other=$other gold=$goldOn")
+        return s
     }
 
     /**
@@ -622,7 +643,7 @@ object ImmersiveHook {
             if (isVideoView(v)) return@walk
             val m = try { matchHideItem(v, topbar, right, other, w, h, loc) } catch (_: Throwable) { null }
             if (m != null) {
-                Logger.d("imm M item=${m.item} cls=${v.javaClass.simpleName} id=${try { val rid = v.id; if (rid != View.NO_ID) v.resources.getResourceEntryName(rid) else "" } catch (_: Throwable) { "" }} x=${m.absX} y=${m.absY} w=${v.width} h=${v.height}")
+                Logger.d("imm M item=${m.item} cls=${v.javaClass.simpleName} id=$<IDNAMEOF> x=${m.absX} y=${m.absY} w=${v.width} h=${v.height}")
                 if (m.byIdRight) {
                     v.visibility = View.GONE; v.tag = HIDDEN_TAG; count++
                 } else if (hideTopItem(v, root, w, h, m.isRight || m.isRightArea, m.absY)) {
@@ -632,7 +653,7 @@ object ImmersiveHook {
             } else if (goldDebug && v.width in 40..200 && v.height in 40..200) {
                 val txt = (v as? TextView)?.text?.toString() ?: ""
                 val cdsc = v.contentDescription?.toString() ?: ""
-                val idN = try { val rid = v.id; if (rid != View.NO_ID) v.resources.getResourceEntryName(rid) else "" } catch (_: Throwable) { "" }
+                val idN = idNameOf(v)
                 if (txt.isBlank() && cdsc.isBlank()) {
                     v.getLocationOnScreen(loc)
                     Logger.d("gold cand cls=${v.javaClass.simpleName} id=$idN x=${loc[0]} y=${loc[1]} w=${v.width} h=${v.height} kids=${if (v is ViewGroup) v.childCount else 0}")
@@ -707,10 +728,7 @@ object ImmersiveHook {
 
     private fun matchItem(item: String, v: View, t: String, w: Int, h: Int): Boolean {
         val cn = v.javaClass.name
-        val idName = try {
-            val rid = v.id
-            if (rid != View.NO_ID) v.resources.getResourceEntryName(rid) else ""
-        } catch (_: Throwable) { "" }
+        val idName = idNameOf(v)
         if (item in LEAF_ITEMS && v is ViewGroup && v.width > w * 3 / 5) return false
         return when (item) {
             "点赞" -> t.contains("点赞") || t.contains("like", true)
@@ -762,10 +780,7 @@ object ImmersiveHook {
             walk(decor, 0) { v, d ->
                 if (v.visibility != View.VISIBLE) return@walk
                 val cn = v.javaClass.simpleName
-                val idName = try {
-                    val rid = v.id
-                    if (rid != View.NO_ID) v.resources.getResourceEntryName(rid) else ""
-                } catch (_: Throwable) { "" }
+                val idName = idNameOf(v)
                 val t = if (v is TextView) v.text?.toString() ?: "" else ""
                 val cd = v.contentDescription?.toString() ?: ""
                 val b = "[${v.left},${v.top}][${v.right},${v.bottom}]"
