@@ -31,4 +31,5 @@ ManJiao-android-icons.zip
 app/.cxx/
 
 # Misc
-*.log
+*.logbuild_log.txt
+
