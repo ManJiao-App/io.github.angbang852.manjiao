@@ -30,6 +30,7 @@ object ImmersiveHook {
     private val STRIP_TAG = Object()
     private val GOLD_FAST_IDS = arrayOf("photo_detail_placeholder_lottie", "photo_detail_gold_coin", "gold_coin_pendant", "coin_float_container")
     private var passCount = 0
+    private var skipGc = 0
     private val RESET_INTERVAL = 3
 
     private val HIDE_IDS = arrayOf(
@@ -124,7 +125,7 @@ object ImmersiveHook {
             val act = tracked
             if (act != null) hideByConfig(act)
             // 全关时降频轮询（只读 Prefs 判断 mode，零遍历）；有开关开启才高频跑
-            if (active) handler.postDelayed(this, if (lastMode == 0) 3000 else if (onlyGoldOn()) 5000 else 1500)
+            if (active) handler.postDelayed(this, if (lastMode == 0) 3000 else if (onlyGoldOn()) 5000 else 2500)
         }
     }
 
@@ -165,6 +166,14 @@ object ImmersiveHook {
         && !Prefs.bool(Prefs.K_IMM_CUSTOM, false)
 
     private fun hideByConfig(act: Activity) {
+        // GC 压力保护：堆 >90% 时跳过本轮遍历，避免在 GC 期间加重主线程负担
+        // （快手稳态堆 234/258MB，GC 每次回收 17-64MB 耗时 128-999ms）
+        val rt = Runtime.getRuntime()
+        if ((rt.totalMemory() - rt.freeMemory()).toFloat() / rt.maxMemory() > 0.9f) {
+            skipGc++
+            if (skipGc % 10 == 0) Logger.d("imm skip gc heap=${(rt.totalMemory() - rt.freeMemory()) / 1024 / 1024}MB/${rt.maxMemory() / 1024 / 1024}MB n=$skipGc")
+            return
+        }
         val decor = act.window.decorView as? ViewGroup ?: return
         val immOn = Prefs.bool(Prefs.K_IMM_ON, false)
         val immCustom = Prefs.bool(Prefs.K_IMM_CUSTOM, false)
