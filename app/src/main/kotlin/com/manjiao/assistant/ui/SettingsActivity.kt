@@ -134,6 +134,7 @@ class SettingsActivity : AppCompatActivity() {
 
             Item("⚡", "性能优化") { showPerf() },
             Item("🧹", "快手净化") { showPurify() },
+            Item("ℹ️", "关于") { showAbout() },
         )
         for ((i, item) in items.withIndex()) {
             panel.addView(itemRow(item))
@@ -545,4 +546,56 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     private fun toast(msg: String) { Toast.makeText(this, msg, Toast.LENGTH_SHORT).show() }
+
+    private fun appVersion(): String = try { packageManager.getPackageInfo(packageName, 0).versionName ?: "1.0" } catch (_: Throwable) { "1.0" }
+
+    private fun showAbout() {
+        clearPanel()
+        panel.addView(header("关于", true))
+        panel.addView(divider())
+        panel.addView(infoRow("当前版本", appVersion()))
+        panel.addView(divider())
+        val urlRow = infoRow("项目网址", "github.com/1012127092/ManJiao")
+        urlRow.isClickable = true; urlRow.isFocusable = true; urlRow.background = ripple()
+        urlRow.setOnClickListener {
+            try { startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://github.com/1012127092/ManJiao"))) } catch (_: Throwable) {}
+        }
+        panel.addView(urlRow)
+        panel.addView(divider())
+        panel.addView(buttonRow("检查更新") { checkUpdate(false) })
+        panel.addView(space(8))
+        jellyEnter(panel)
+        checkUpdate(true)
+    }
+
+    private fun infoRow(label: String, value: String): View {
+        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(20), dp(16), dp(20), dp(16)) }
+        row.addView(TextView(this).apply { text = label; textSize = 16f; setTypeface(typeface, android.graphics.Typeface.BOLD); layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f) }.also { outline(it) })
+        row.addView(TextView(this).apply { text = value; textSize = 15f; setTextColor(0xCCFFFFFF.toInt()) }.also { outline(it) })
+        return row
+    }
+
+    private fun checkUpdate(auto: Boolean) {
+        if (!auto) toast("检查更新中…")
+        Thread {
+            try {
+                val conn = java.net.URL("https://api.github.com/repos/1012127092/ManJiao/releases/latest").openConnection() as java.net.HttpURLConnection
+                conn.connectTimeout = 10000; conn.readTimeout = 10000
+                conn.setRequestProperty("User-Agent", "ManJiao")
+                val body = conn.inputStream.bufferedReader().use { it.readText() }
+                conn.disconnect()
+                val latest = Regex("\"tag_name\"\\s*:\\s*\"(?:v)?([^\"]+)\"").find(body)?.groupValues?.get(1) ?: return@Thread
+                val dlUrl = Regex("\"html_url\"\\s*:\\s*\"([^\"]+)\"").find(body)?.groupValues?.get(1) ?: "https://github.com/1012127092/ManJiao/releases"
+                val cur = appVersion()
+                runOnUiThread {
+                    if (latest != cur) {
+                        toast("发现新版本 $latest")
+                        if (!auto) { try { startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(dlUrl))) } catch (_: Throwable) {} }
+                    } else { if (!auto) toast("已是最新版本") }
+                }
+            } catch (t: Throwable) {
+                runOnUiThread { if (!auto) toast("检查更新失败") }
+            }
+        }.start()
+    }
 }

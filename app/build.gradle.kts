@@ -11,14 +11,23 @@ android {
         minSdk = 24
         targetSdk = 35
         versionCode = 1
-        versionName = "1.0.0"
+        versionName = "1.0"
         ndk { abiFilters += listOf("arm64-v8a") }
         externalNativeBuild { cmake { cppFlags += "-std=c++17" } }
     }
     externalNativeBuild { cmake { path = file("src/main/cpp/CMakeLists.txt") } }
+    signingConfigs {
+        create("release") {
+            storeFile = file("E:/文档/Deepseek Harness EAC/工具/密钥/签名密钥/release-manjiao.keystore")
+            storePassword = "REDACTED"
+            keyAlias = "manjiao"
+            keyPassword = "REDACTED"
+        }
+    }
     buildTypes {
         release {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("release")
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }

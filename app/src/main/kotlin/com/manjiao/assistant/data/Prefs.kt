@@ -262,6 +262,7 @@ object Prefs {
 
     fun reload() {
         if (remote) pullRemote(force = true)
+        else mergeMediaIntoSp()
     }
 
     private fun remoteWriteMedia(type: String, key: String, value: Any?) {
