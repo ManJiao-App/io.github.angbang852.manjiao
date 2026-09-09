@@ -555,10 +555,10 @@ class SettingsActivity : AppCompatActivity() {
         panel.addView(divider())
         panel.addView(infoRow("当前版本", appVersion()))
         panel.addView(divider())
-        val urlRow = infoRow("项目网址", "github.com/1012127092/ManJiao")
+        val urlRow = infoRow("项目网址", "github.com/ManJiao-App/ManJiao")
         urlRow.isClickable = true; urlRow.isFocusable = true; urlRow.background = ripple()
         urlRow.setOnClickListener {
-            try { startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://github.com/1012127092/ManJiao"))) } catch (_: Throwable) {}
+            try { startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://github.com/ManJiao-App/ManJiao"))) } catch (_: Throwable) {}
         }
         panel.addView(urlRow)
         panel.addView(divider())
@@ -579,13 +579,13 @@ class SettingsActivity : AppCompatActivity() {
         if (!auto) toast("检查更新中…")
         Thread {
             try {
-                val conn = java.net.URL("https://api.github.com/repos/1012127092/ManJiao/releases/latest").openConnection() as java.net.HttpURLConnection
+                val conn = java.net.URL("https://api.github.com/repos/ManJiao-App/ManJiao/releases/latest").openConnection() as java.net.HttpURLConnection
                 conn.connectTimeout = 10000; conn.readTimeout = 10000
                 conn.setRequestProperty("User-Agent", "ManJiao")
                 val body = conn.inputStream.bufferedReader().use { it.readText() }
                 conn.disconnect()
                 val latest = Regex("\"tag_name\"\\s*:\\s*\"(?:v)?([^\"]+)\"").find(body)?.groupValues?.get(1) ?: return@Thread
-                val dlUrl = Regex("\"html_url\"\\s*:\\s*\"([^\"]+)\"").find(body)?.groupValues?.get(1) ?: "https://github.com/1012127092/ManJiao/releases"
+                val dlUrl = Regex("\"html_url\"\\s*:\\s*\"([^\"]+)\"").find(body)?.groupValues?.get(1) ?: "https://github.com/ManJiao-App/ManJiao/releases"
                 val cur = appVersion()
                 runOnUiThread {
                     if (latest != cur) {
