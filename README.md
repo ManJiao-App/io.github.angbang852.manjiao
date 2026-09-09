@@ -1,6 +1,6 @@
 # ManJiao
 
-快手功能性 Xposed 模块。
+快手功能性 LSPosed 模块。
 
 ## 功能
 
