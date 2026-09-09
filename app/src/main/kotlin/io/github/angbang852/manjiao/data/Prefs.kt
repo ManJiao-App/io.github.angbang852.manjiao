@@ -1,20 +1,20 @@
-package com.manjiao.assistant.data
+package io.github.angbang852.manjiao.data
 
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
-import com.manjiao.assistant.util.Logger
+import io.github.angbang852.manjiao.util.Logger
 import java.io.File
 import java.util.Properties
 
 object Prefs {
     const val FILE = "slowkick"
-    const val ACTION_UPDATE = "com.manjiao.assistant.PREFS_UPDATE"
-    const val ACTION_WRITE = "com.manjiao.assistant.PREFS_WRITE"
-    const val ACTION_QUERY = "com.manjiao.assistant.PREFS_QUERY"
-    const val ACTION_PULL = "com.manjiao.assistant.PREFS_PULL"
-    private const val OWN_PKG = "com.manjiao.assistant"
-    private const val MEDIA_DIR = "/sdcard/Android/media/com.manjiao.assistant"
+    const val ACTION_UPDATE = "io.github.angbang852.manjiao.PREFS_UPDATE"
+    const val ACTION_WRITE = "io.github.angbang852.manjiao.PREFS_WRITE"
+    const val ACTION_QUERY = "io.github.angbang852.manjiao.PREFS_QUERY"
+    const val ACTION_PULL = "io.github.angbang852.manjiao.PREFS_PULL"
+    private const val OWN_PKG = "io.github.angbang852.manjiao"
+    private const val MEDIA_DIR = "/sdcard/Android/media/io.github.angbang852.manjiao"
     private const val MEDIA_FILE = "$MEDIA_DIR/slowkick.properties"
     private const val PULL_INTERVAL_MS = 2000L
     private const val QUERY_INTERVAL_MS = 30000L

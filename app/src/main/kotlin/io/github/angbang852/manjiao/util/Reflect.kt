@@ -1,4 +1,4 @@
-package com.manjiao.assistant.util
+package io.github.angbang852.manjiao.util
 
 import java.lang.reflect.Field
 import java.lang.reflect.Method

@@ -1,4 +1,4 @@
-package com.manjiao.assistant.hook
+package io.github.angbang852.manjiao.hook
 
 import android.app.Activity
 import android.os.Handler
@@ -8,11 +8,11 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
-import com.manjiao.assistant.KsClass
-import com.manjiao.assistant.data.CurrentVideo
-import com.manjiao.assistant.data.Prefs
-import com.manjiao.assistant.util.Logger
-import com.manjiao.assistant.util.Reflect
+import io.github.angbang852.manjiao.KsClass
+import io.github.angbang852.manjiao.data.CurrentVideo
+import io.github.angbang852.manjiao.data.Prefs
+import io.github.angbang852.manjiao.util.Logger
+import io.github.angbang852.manjiao.util.Reflect
 import io.github.libxposed.api.XposedInterface
 
 object ContentFilterHook {
@@ -4879,7 +4879,7 @@ if (hookedAny) Logger.d("hookLiveRerank done pkg=$pkg")
 
     // ==================== UI 层兜�?====================
 
-    private fun shouldFilterMeta(v: com.manjiao.assistant.data.VideoInfo): Boolean {
+    private fun shouldFilterMeta(v: io.github.angbang852.manjiao.data.VideoInfo): Boolean {
         if (Prefs.bool(Prefs.K_FLT_ADS, true) && v.isAd) return true
         if (Prefs.bool(Prefs.K_FLT_LIVE, false) && v.isLive) return true
         if (Prefs.bool(Prefs.K_FLT_AI, false) && (v.isAi || v.caption.orEmpty().contains("ai生成", true) || v.caption.orEmpty().contains("AI创作") || v.caption.orEmpty().contains("疑似") || v.caption.orEmpty().contains("AIGC") || v.caption.orEmpty().contains("人工智能") || Regex("\\bAI\\b|AI[生成制作绘画]|:AI|AI：").containsMatchIn(v.caption.orEmpty()))) return true

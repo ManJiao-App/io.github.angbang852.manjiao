@@ -1,8 +1,8 @@
-package com.manjiao.assistant.hook
+package io.github.angbang852.manjiao.hook
 
 import android.app.Service
-import com.manjiao.assistant.data.Prefs
-import com.manjiao.assistant.util.Logger
+import io.github.angbang852.manjiao.data.Prefs
+import io.github.angbang852.manjiao.util.Logger
 import io.github.libxposed.api.XposedInterface
 
 object PurifyHook {

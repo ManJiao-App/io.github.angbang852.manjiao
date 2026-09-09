@@ -1,7 +1,7 @@
-﻿package com.manjiao.assistant.hook
+package io.github.angbang852.manjiao.hook
 
-import com.manjiao.assistant.util.Logger
-import com.manjiao.assistant.util.Reflect
+import io.github.angbang852.manjiao.util.Logger
+import io.github.angbang852.manjiao.util.Reflect
 import io.github.libxposed.api.XposedInterface
 import java.io.File
 import java.io.IOException

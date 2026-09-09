@@ -31,8 +31,8 @@
             android:name=".data.PrefsWriteReceiver"
             android:exported="true">
             <intent-filter>
-                <action android:name="com.manjiao.assistant.PREFS_WRITE" />
-                <action android:name="com.manjiao.assistant.PREFS_QUERY" />
+                <action android:name="io.github.angbang852.manjiao.PREFS_WRITE" />
+                <action android:name="io.github.angbang852.manjiao.PREFS_QUERY" />
             </intent-filter>
         </receiver>
 

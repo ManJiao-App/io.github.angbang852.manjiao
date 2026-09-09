@@ -1,13 +1,13 @@
-package com.manjiao.assistant.hook
+package io.github.angbang852.manjiao.hook
 
 import android.app.Activity
 import android.os.Message
 import android.view.View
 import android.view.ViewGroup
-import com.manjiao.assistant.KsClass
-import com.manjiao.assistant.data.Prefs
-import com.manjiao.assistant.util.Logger
-import com.manjiao.assistant.util.Reflect
+import io.github.angbang852.manjiao.KsClass
+import io.github.angbang852.manjiao.data.Prefs
+import io.github.angbang852.manjiao.util.Logger
+import io.github.angbang852.manjiao.util.Reflect
 import io.github.libxposed.api.XposedInterface
 
 object PlaybackHook {

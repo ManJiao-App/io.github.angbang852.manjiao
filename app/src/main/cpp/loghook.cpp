@@ -36,7 +36,7 @@ static int hook_log_vprint(int prio, const char* tag, const char* fmt, va_list a
 
 
 extern "C" JNIEXPORT jboolean JNICALL
-Java_com_manjiao_assistant_hook_PerfHook_nativeInitLogHook(JNIEnv*, jclass) {
+Java_io_github_angbang852_manjiao_hook_PerfHook_nativeInitLogHook(JNIEnv*, jclass) {
     int ok = 0;
     void* p1 = (void*)&__android_log_buf_write;
     if (p1 && DobbyHook(p1, (void*)hook_buf_write, (void**)&orig_buf_write) == 0) ok++;

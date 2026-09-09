@@ -1,4 +1,4 @@
-package com.manjiao.assistant.util
+package io.github.angbang852.manjiao.util
 
 import android.content.Context
 import android.graphics.Bitmap

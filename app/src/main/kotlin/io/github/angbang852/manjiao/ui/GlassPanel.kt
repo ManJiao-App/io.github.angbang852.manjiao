@@ -1,4 +1,4 @@
-package com.manjiao.assistant.ui
+package io.github.angbang852.manjiao.ui
 
 import android.content.Context
 import android.content.res.Configuration

@@ -1,4 +1,4 @@
-﻿package com.manjiao.assistant.data
+package io.github.angbang852.manjiao.data
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -14,7 +14,7 @@ import android.os.Handler
 import android.os.Looper
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
-import com.manjiao.assistant.util.Logger
+import io.github.angbang852.manjiao.util.Logger
 import java.io.File
 import java.io.FileOutputStream
 import java.net.HttpURLConnection

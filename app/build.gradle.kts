@@ -1,13 +1,13 @@
-﻿plugins {
+plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
 }
 
 android {
-    namespace = "com.manjiao.assistant"
+    namespace = "io.github.angbang852.manjiao"
     compileSdk = 35
     defaultConfig {
-        applicationId = "com.manjiao.assistant"
+        applicationId = "io.github.angbang852.manjiao"
         minSdk = 24
         targetSdk = 35
         versionCode = 1

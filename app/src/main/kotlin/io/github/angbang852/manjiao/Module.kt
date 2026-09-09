@@ -1,23 +1,23 @@
-﻿package com.manjiao.assistant
+package io.github.angbang852.manjiao
 
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 
-import com.manjiao.assistant.data.Prefs
-import com.manjiao.assistant.hook.AntiAntiHook
-import com.manjiao.assistant.hook.ContentFilterHook
-import com.manjiao.assistant.hook.GestureHook
-import com.manjiao.assistant.hook.GoldFloatHook
-import com.manjiao.assistant.hook.ImmersiveHook
-import com.manjiao.assistant.hook.PerfHook
-import com.manjiao.assistant.hook.PlaybackHook
-import com.manjiao.assistant.hook.PurifyHook
+import io.github.angbang852.manjiao.data.Prefs
+import io.github.angbang852.manjiao.hook.AntiAntiHook
+import io.github.angbang852.manjiao.hook.ContentFilterHook
+import io.github.angbang852.manjiao.hook.GestureHook
+import io.github.angbang852.manjiao.hook.GoldFloatHook
+import io.github.angbang852.manjiao.hook.ImmersiveHook
+import io.github.angbang852.manjiao.hook.PerfHook
+import io.github.angbang852.manjiao.hook.PlaybackHook
+import io.github.angbang852.manjiao.hook.PurifyHook
 
-import com.manjiao.assistant.hook.SharePanelHook
-import com.manjiao.assistant.hook.VideoDownloaderHook
-import com.manjiao.assistant.util.Logger
+import io.github.angbang852.manjiao.hook.SharePanelHook
+import io.github.angbang852.manjiao.hook.VideoDownloaderHook
+import io.github.angbang852.manjiao.util.Logger
 import io.github.libxposed.api.XposedInterface
 import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface

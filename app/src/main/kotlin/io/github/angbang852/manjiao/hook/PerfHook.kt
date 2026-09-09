@@ -1,9 +1,9 @@
-package com.manjiao.assistant.hook
+package io.github.angbang852.manjiao.hook
 
 import android.hardware.Sensor
 import android.hardware.SensorManager
-import com.manjiao.assistant.data.Prefs
-import com.manjiao.assistant.util.Logger
+import io.github.angbang852.manjiao.data.Prefs
+import io.github.angbang852.manjiao.util.Logger
 import io.github.libxposed.api.XposedInterface
 
 /**

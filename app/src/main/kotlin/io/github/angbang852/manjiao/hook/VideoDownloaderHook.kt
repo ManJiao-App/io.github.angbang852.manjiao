@@ -1,13 +1,13 @@
-﻿package com.manjiao.assistant.hook
+package io.github.angbang852.manjiao.hook
 
 import android.app.Activity
 import android.content.Context
 import android.net.Uri
-import com.manjiao.assistant.KsClass
-import com.manjiao.assistant.data.CurrentVideo
-import com.manjiao.assistant.data.RepUrl
-import com.manjiao.assistant.util.Logger
-import com.manjiao.assistant.util.Reflect
+import io.github.angbang852.manjiao.KsClass
+import io.github.angbang852.manjiao.data.CurrentVideo
+import io.github.angbang852.manjiao.data.RepUrl
+import io.github.angbang852.manjiao.util.Logger
+import io.github.angbang852.manjiao.util.Reflect
 import io.github.libxposed.api.XposedInterface
 import java.lang.reflect.Method
 import java.net.URL

@@ -1,9 +1,9 @@
-package com.manjiao.assistant.data
+package io.github.angbang852.manjiao.data
 
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import com.manjiao.assistant.util.Logger
+import io.github.angbang852.manjiao.util.Logger
 
 class PrefsWriteReceiver : BroadcastReceiver() {
     override fun onReceive(ctx: Context, i: Intent) {

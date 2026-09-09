@@ -1,4 +1,4 @@
-﻿package com.manjiao.assistant.hook
+package io.github.angbang852.manjiao.hook
 
 import android.app.Dialog
 import android.content.Context
@@ -15,9 +15,9 @@ import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
-import com.manjiao.assistant.ui.MainMenuDialog
-import com.manjiao.assistant.util.IconData
-import com.manjiao.assistant.util.Logger
+import io.github.angbang852.manjiao.ui.MainMenuDialog
+import io.github.angbang852.manjiao.util.IconData
+import io.github.angbang852.manjiao.util.Logger
 import io.github.libxposed.api.XposedInterface
 
 object SharePanelHook {

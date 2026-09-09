@@ -1,4 +1,4 @@
-package com.manjiao.assistant.ui
+package io.github.angbang852.manjiao.ui
 
 import android.app.Activity
 import android.content.Context
@@ -25,13 +25,13 @@ import android.widget.ScrollView
 
 import android.widget.TextView
 import android.widget.Toast
-import com.manjiao.assistant.KsClass
+import io.github.angbang852.manjiao.KsClass
 
-import com.manjiao.assistant.data.CurrentVideo
-import com.manjiao.assistant.data.DownloadService
-import com.manjiao.assistant.data.Prefs
-import com.manjiao.assistant.hook.ContentFilterHook
-import com.manjiao.assistant.util.Logger
+import io.github.angbang852.manjiao.data.CurrentVideo
+import io.github.angbang852.manjiao.data.DownloadService
+import io.github.angbang852.manjiao.data.Prefs
+import io.github.angbang852.manjiao.hook.ContentFilterHook
+import io.github.angbang852.manjiao.util.Logger
 
 
 object MainMenuDialog {

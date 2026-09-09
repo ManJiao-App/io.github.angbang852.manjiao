@@ -1,4 +1,4 @@
-package com.manjiao.assistant.hook
+package io.github.angbang852.manjiao.hook
 
 import android.app.Activity
 import android.os.Build
@@ -14,10 +14,10 @@ import android.view.WindowInsets
 import android.view.WindowInsetsController
 import android.view.WindowManager
 import android.widget.TextView
-import com.manjiao.assistant.KsClass
-import com.manjiao.assistant.data.Prefs
-import com.manjiao.assistant.util.Logger
-import com.manjiao.assistant.util.Reflect
+import io.github.angbang852.manjiao.KsClass
+import io.github.angbang852.manjiao.data.Prefs
+import io.github.angbang852.manjiao.util.Logger
+import io.github.angbang852.manjiao.util.Reflect
 import io.github.libxposed.api.XposedInterface
 
 object ImmersiveHook {
@@ -812,7 +812,7 @@ object ImmersiveHook {
         cb(v)
         if (isVideoView(v)) return
         if (v.tag === HIDDEN_TAG && v.visibility == View.VISIBLE) v.visibility = View.GONE
-        if (com.manjiao.assistant.ui.MainMenuDialog.isOverlay(v)) return
+        if (io.github.angbang852.manjiao.ui.MainMenuDialog.isOverlay(v)) return
         if (v is ViewGroup) for (i in 0 until v.childCount) v.getChildAt(i)?.let { walk(it, cb) }
     }
 

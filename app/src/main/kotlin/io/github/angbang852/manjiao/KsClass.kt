@@ -1,4 +1,4 @@
-﻿package com.manjiao.assistant
+package io.github.angbang852.manjiao
 
 object KsClass {
     const val PKG = "com.smile.gifmaker"

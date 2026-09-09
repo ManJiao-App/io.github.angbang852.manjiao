@@ -1,4 +1,4 @@
-﻿package com.manjiao.assistant.data
+package io.github.angbang852.manjiao.data
 
 data class RepUrl(val url: String, val height: Long, val bitrate: Long)
 
