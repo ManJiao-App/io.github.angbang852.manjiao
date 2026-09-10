@@ -42,6 +42,10 @@
             android:exported="true"
             tools:ignore="ExportedContentProvider" />
 
+        <meta-data
+            android:name="xposeddescription"
+            android:value="@string/module_desc" />
+
     </application>
 
 </manifest>
