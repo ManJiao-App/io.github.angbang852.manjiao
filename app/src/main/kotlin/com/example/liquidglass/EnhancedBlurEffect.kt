@@ -267,95 +267,44 @@ class EnhancedBlurEffect(
 
     /**
      * IIR 递归高斯模糊（标量版本）
+     * ★ 内置版无 JNI：原实现先 bitmap.copy 全量拷贝再必抛 no-jni 回退——
+     * 每次 blur 白费一张全尺寸位图 + Log.e 刷屏。直达有效终点 Box Blur
      */
     private fun applyIIRGaussian(bitmap: Bitmap, sigma: Float): Bitmap {
-        // 创建可编辑副本
-        val mutableBitmap = bitmap.copy(Bitmap.Config.ARGB_8888, true)
-        
-        try {
-            throw UnsupportedOperationException("no-jni")
-        } catch (e: Exception) {
-            Log.e(TAG, "IIR Gaussian blur failed: ${e.message}")
-            // 回退到 Box Blur
-            return applyBoxBlur(bitmap, sigma * 3f)
-        }
-        
-        return mutableBitmap
+        return applyBoxBlur(bitmap, sigma * 3f)
     }
     
     /**
      * IIR 递归高斯模糊（NEON 优化版本）
+     * ★ 内置版无 JNI：直达标量版终点（Box Blur），不再走拷贝+必抛+双跳链
      */
     private fun applyIIRGaussianNeon(bitmap: Bitmap, sigma: Float): Bitmap {
-        if (!neonSupported) {
-            Log.w(TAG, "NEON not supported, fallback to scalar IIR")
-            return applyIIRGaussian(bitmap, sigma)
-        }
-        
-        // 创建可编辑副本
-        val mutableBitmap = bitmap.copy(Bitmap.Config.ARGB_8888, true)
-        
-        try {
-            throw UnsupportedOperationException("no-jni")
-        } catch (e: Exception) {
-            Log.e(TAG, "IIR Gaussian NEON blur failed: ${e.message}")
-            // 回退到标量版本
-            return applyIIRGaussian(bitmap, sigma)
-        }
-        
-        return mutableBitmap
+        return applyIIRGaussian(bitmap, sigma)
     }
     
     /**
      * Box3 快速模糊
+     * ★ 内置版无 JNI：直达 Box Blur（原拷贝+必抛桩已删）
      */
     private fun applyBox3(bitmap: Bitmap, sigma: Float): Bitmap {
-        // 创建可编辑副本
-        val mutableBitmap = bitmap.copy(Bitmap.Config.ARGB_8888, true)
-        
-        // σ 转换为 Box3 半径：radius ≈ σ * 1.2
-        val radius = (sigma * 1.2f).toInt().coerceAtLeast(1)
-        
-        try {
-            throw UnsupportedOperationException("no-jni")
-        } catch (e: Exception) {
-            Log.e(TAG, "Box3 blur failed: ${e.message}")
-            // 回退到 Box Blur
-            return applyBoxBlur(bitmap, sigma * 3f)
-        }
-        
-        return mutableBitmap
+        return applyBoxBlur(bitmap, sigma * 3f)
     }
     
     /**
      * 智能选择模糊算法
+     * ★ 内置版无 JNI：直达 Box Blur（原拷贝+必抛桩已删）
      */
     private fun applySmartBlur(bitmap: Bitmap, sigma: Float): Bitmap {
-        // 创建可编辑副本
-        val mutableBitmap = bitmap.copy(Bitmap.Config.ARGB_8888, true)
-        
-        try {
-            throw UnsupportedOperationException("no-jni")
-        } catch (e: Exception) {
-            Log.e(TAG, "Smart blur failed: ${e.message}")
-            // 回退到 Box Blur
-            return applyBoxBlur(bitmap, sigma * 3f)
-        }
-        
-        return mutableBitmap
+        return applyBoxBlur(bitmap, sigma * 3f)
     }
     
     /**
      * 下采样管线模糊
+     * ★ 内置版无 JNI：原链 downsample→smart(拷贝+必抛)→box 三跳两次空转，
+     * 直达同一终点 Box Blur
      */
     private fun applyDownsampleBlur(bitmap: Bitmap, sigma: Float): Bitmap {
-        try {
-            throw UnsupportedOperationException("no-jni")
-        } catch (e: Exception) {
-            Log.e(TAG, "Downsample blur failed: ${e.message}")
-            // 回退到智能模糊
-            return applySmartBlur(bitmap, sigma)
-        }
+        return applyBoxBlur(bitmap, sigma * 3f)
     }
     
     /**
