@@ -767,6 +767,10 @@ open class LiquidGlassView @JvmOverloads constructor(
     private var cachedBackdrop: Bitmap? = null          // L1: 原始背景
     private var cachedBlurred: Bitmap? = null           // L2: 模糊后的背景
     private var cachedResult: Bitmap? = null            // L3: 最终结果
+    // L3 是从哪个 L2 位图拷贝来的（仅无效果/直通桩路径使用）：
+    // 管道会回收旧 L1/L2，cachedResult 绝不能与它们别名（自吞回收），
+    // 但「每个 L2 实例只拷一次」可以靠身份比较做到，静止背景零重复拷贝
+    private var plainResultSource: Bitmap? = null
 
     // 背景变化检测
     private var lastBackdropHash: Int = 0
@@ -1074,6 +1078,7 @@ open class LiquidGlassView @JvmOverloads constructor(
         cachedBackdrop = null
         cachedBlurred = null
         cachedResult = null
+        plainResultSource = null
 
         // 标记所有层为脏（背景每帧都会捕获，不需要标记）
         lastBackdropHash = 0  // 重置背景哈希
@@ -1814,9 +1819,22 @@ open class LiquidGlassView @JvmOverloads constructor(
                     cornerRadii = cornerRadiiPx()
                 )
 
-                cachedResult?.recycle()
-                cachedResult = dispersed
-                effectRecomputed = true
+                if (dispersed !== blurred) {
+                    // 真实效果输出新位图：安全替换
+                    if (cachedResult !== blurred) cachedResult?.recycle()
+                    cachedResult = dispersed
+                    plainResultSource = null
+                    effectRecomputed = true
+                } else if (plainResultSource !== blurred) {
+                    // ★ 内置色散桩是直通（dispersed === blurred）：原代码无脑
+                    // recycle + 别名会让 cachedResult 与 blurred 同对象，管道回收
+                    // 旧背景时自我回收，静止背景第二帧起玻璃永久空白。改为拷贝
+                    // 解耦，且每个 blurred 实例只拷一次（静止背景零重复拷贝）
+                    if (cachedResult !== blurred) cachedResult?.recycle()
+                    cachedResult = blurred.copy(blurred.config ?: Bitmap.Config.ARGB_8888, true)
+                    plainResultSource = blurred
+                    effectRecomputed = true
+                }
             }
 
             if (collectTiming) t4 = System.nanoTime()
@@ -1844,6 +1862,7 @@ open class LiquidGlassView @JvmOverloads constructor(
                 // 4. 直接使用色差效果结果（已移除圆角遮罩）
                 cachedResult?.recycle()
                 cachedResult = aberrated
+                plainResultSource = null  // 结果已非 plain 拷贝，切回无效果路径时需重拷
                 lastAberrationIntensity = aberrationIntensity
                 effectRecomputed = true
             }
@@ -1855,9 +1874,14 @@ open class LiquidGlassView @JvmOverloads constructor(
             if (collectTiming) t4 = System.nanoTime()
 
             // 没有色差/色散效果，直接使用模糊后的结果（已移除圆角遮罩）
+            // ★ 只在「没有为这个 blurred 拷贝过」时拷：原条件里的
+            // !enableChromaticAberration 使关色差时每帧全图 copy 一次
             cachedBlurred?.let { blurred ->
-                cachedResult?.recycle()
-                cachedResult = blurred.copy(blurred.config ?: Bitmap.Config.ARGB_8888, true)
+                if (plainResultSource !== blurred) {
+                    cachedResult?.recycle()
+                    cachedResult = blurred.copy(blurred.config ?: Bitmap.Config.ARGB_8888, true)
+                    plainResultSource = blurred
+                }
             }
             aberrationDirty = false
             dispersionDirty = false
@@ -2191,6 +2215,7 @@ open class LiquidGlassView @JvmOverloads constructor(
         cachedBackdrop = null
         cachedBlurred = null
         cachedResult = null
+        plainResultSource = null
 
         // 注意：位移贴图跨 detach 保留（切换场景重挂载时无需重新生成，
         // 避免主线程卡顿），仅在尺寸变化时重建，最终随视图对象被 GC 回收

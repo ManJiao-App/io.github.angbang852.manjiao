@@ -348,9 +348,12 @@ object VideoDownloaderHook {
         val pt = Reflect.readString(p, *KsClass.PHOTO_TYPE_FIELDS) ?: ""
         return pt.contains("image", true) || pt.contains("atlas", true) || !Reflect.readBool(p, *KsClass.IS_VIDEO_FIELDS)
     }
+    // ★ 词边界匹配：原 contains("AI", true) 会把英文文案里的 email/detail/said/
+    // again/rain 全部命中（忽略大小写子串），开启 flt_ai 后大面积误杀普通视频
+    private val AI_CAPTION_REGEX = Regex("\\bAI\\b|AI[生成制作绘画]|AIGC|人工智能", RegexOption.IGNORE_CASE)
     private fun isAi(p: Any, cap: String?): Boolean {
         val pt = Reflect.readString(p, *KsClass.PHOTO_TYPE_FIELDS) ?: ""
-        return pt.contains("ai", true) || (cap?.contains("AI", true) == true) || Reflect.readBool(p, "isAi", "mIsAi")
+        return pt.startsWith("ai", true) || (cap?.let { AI_CAPTION_REGEX.containsMatchIn(it) } == true) || Reflect.readBool(p, "isAi", "mIsAi")
     }
     private fun isEc(p: Any, cap: String?): Boolean {
         val n = p.javaClass.name

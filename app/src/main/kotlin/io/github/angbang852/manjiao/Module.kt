@@ -107,7 +107,7 @@ class Module : XposedModule {
                                 Logger.d("prefs sync $type $key")
                             } catch (t: Throwable) { Logger.d("prefs recv fail: ${t.message}") }
                         }
-                    }, IntentFilter(Prefs.ACTION_UPDATE).apply { addAction(Prefs.ACTION_PULL) }, Context.RECEIVER_EXPORTED)
+                    }, IntentFilter(Prefs.ACTION_UPDATE).apply { addAction(Prefs.ACTION_PULL) }, Prefs.PERM_SYNC, null, Context.RECEIVER_EXPORTED)
                     Logger.d("prefs receiver registered")
                     Logger.safe("anti") { AntiAntiHook.hook(this, cl) }
                     Logger.safe("dl") { VideoDownloaderHook.hook(this, cl) }

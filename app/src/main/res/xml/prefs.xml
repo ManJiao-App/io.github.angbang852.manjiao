@@ -1,8 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android">
-    <PreferenceCategory android:title="@string/pref_general">
-        <SwitchPreferenceCompat android:key="anti_detect" android:title="@string/pref_anti" android:defaultValue="true" />
-        <EditTextPreference android:key="dl_path" android:title="@string/pref_dl_path" android:defaultValue="/sdcard/Download/ManJiao" />
-        <EditTextPreference android:key="like_threshold" android:title="@string/pref_like_threshold" android:defaultValue="0" />
-    </PreferenceCategory>
-</PreferenceScreen>

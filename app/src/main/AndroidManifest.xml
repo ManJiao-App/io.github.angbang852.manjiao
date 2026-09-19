@@ -6,6 +6,12 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- 配置同步鉴权：signature 级——只有本模块（同证书）能向快手进程内的
+         PREFS_UPDATE/PREFS_PULL 接收器投递广播，第三方 app 无法伪造/篡改配置 -->
+    <permission
+        android:name="io.github.angbang852.manjiao.permission.PREFS_SYNC"
+        android:protectionLevel="signature" />
+
     <application
         android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"

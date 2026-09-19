@@ -53,7 +53,15 @@ object PurifyHook {
                     xp.hook(m).setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE).setId("purify.log.$mn").intercept { chain ->
                         if (Prefs.bool(Prefs.K_PURIFY_LOG, true)) {
                             if (blockDiag < 30) { blockDiag++; Logger.always("purify block log: $mn") }
-                            return@intercept null
+                            // ★ 按返回类型给安全空值：原统一 return null 对 int 返回方法
+                            // （delete/update）会在宿主拆箱处 NPE。query→空 Cursor、
+                            // delete/update→0 行、insert→占位 Uri、call→空 Bundle
+                            return@intercept when (mn) {
+                                "query" -> android.database.MatrixCursor(arrayOf("_id"), 1)
+                                "delete", "update" -> 0
+                                "insert" -> android.net.Uri.EMPTY
+                                else -> android.os.Bundle.EMPTY
+                            }
                         }
                         chain.proceed()
                     }

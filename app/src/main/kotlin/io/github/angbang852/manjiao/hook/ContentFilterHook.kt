@@ -331,6 +331,9 @@ object ContentFilterHook {
                 }
             }
         }
+        // ★ 补接线：retry Runnable 构造后从未被调度（postDelayed 只存在于
+        // hookKrnProbe），整条 KRN 拦截链路实际从未安装
+        handler.postDelayed(retry, 2000)
     }
     // 直播重排模块：com.kuaishou.live.rerank 在 VerticalViewPager 滚动时把
     // LiveStreamFeed 直接塞进首页信息流。它的类被混淆（e$b.onPageScrolled 回调 +
@@ -442,6 +445,11 @@ object ContentFilterHook {
                                     val iN = chain.args.getOrNull(0) as? Int ?: -1
                                     if (rerankJDiag < 20) { rerankJDiag++; Logger.always("RERANKJ hit iN=" + iN + " (live 2 ahead) -> force laFind") }
 
+                                    // ★ 诊断闸门：RJDUMP 是主线程 3 层继承链全字段反射
+                                    // + 每项一条 always 日志（不受 quiet 静默），d.j 每次
+                                    // 翻页可多次触发——静默期或超限后跳过 dump，
+                                    // 只保留功能性的 laFind
+                                    if (!Logger.quiet && rerankJDiag < 20) {
                                     try {
 
                                         val dumpAdp = adpRef ?: adpRefs.firstOrNull()
@@ -503,6 +511,7 @@ object ContentFilterHook {
                                         }
 
                                     } catch (_: Throwable) {}
+                                    }
 
                                     try { laFind(true) } catch (_: Throwable) {}
                                 }
@@ -1696,9 +1705,13 @@ if (hookedAny) Logger.d("hookLiveRerank done pkg=$pkg")
             return
         }
         if (Reflect.readAny(ent, "mPhotoMeta") == null) { if (offerDiag < 20) { offerDiag++; Logger.d("offer skip: noMeta") }; return }
-        if (cleanQueue.any { it === qp }) return
-        if (cleanQueue.size >= 12) cleanQueue.removeFirst()
-        cleanQueue.add(qp)
+        // ★ 加锁：offerClean（任意 hook 线程）与 pickFromQueue（cleanExecutor）
+        // 无锁并发操作普通 ArrayDeque 会丢项/竞态（同文件 cleanCachePersist 有锁）
+        synchronized(cleanQueue) {
+            if (cleanQueue.any { it === qp }) return
+            if (cleanQueue.size >= 12) cleanQueue.removeFirst()
+            cleanQueue.add(qp)
+        }
         // 持久缓存：跨窗口不排空，兜底替换�?
         synchronized(cleanCachePersist) {
             if (cleanCachePersist.none { it === qp }) {
@@ -1817,14 +1830,16 @@ if (hookedAny) Logger.d("hookLiveRerank done pkg=$pkg")
     private fun pickFromQueue(): Any? {
         val qpClass = qpClassRef ?: return null
         var idx = 0
-        while (cleanQueue.isNotEmpty() && idx < 24) {
-            val head = cleanQueue.removeFirst()
-            idx++
-            if (qpClass.isAssignableFrom(head.javaClass) && !shouldFilterFeed(head)) {
-                cleanQueue.add(head)
-                if (head !== lastClean || cleanQueue.size == 1) {
-                    lastClean = head
-                    return head
+        synchronized(cleanQueue) {
+            while (cleanQueue.isNotEmpty() && idx < 24) {
+                val head = cleanQueue.removeFirst()
+                idx++
+                if (qpClass.isAssignableFrom(head.javaClass) && !shouldFilterFeed(head)) {
+                    cleanQueue.add(head)
+                    if (head !== lastClean || cleanQueue.size == 1) {
+                        lastClean = head
+                        return head
+                    }
                 }
             }
         }
@@ -2860,6 +2875,7 @@ if (hookedAny) Logger.d("hookLiveRerank done pkg=$pkg")
                                         if ((clsQp != null && shouldFilterFeed(clsQp)) || holderLive || holderDirtyEnt != null) {
                                             if (holderDirtyEnt != null) Logger.d("adpGet holderLiveEnt: ${holderDirtyEnt.javaClass.name}")
                                             adpGetSwapIn = true
+                                            try {
                                             // 任何脏 holder（直播/广告/剧集）：双向扫干净 holder 直接返回，
                                             // 让脏页根本不显示（滑过去是相邻普通视频），不改写数据(避免 ClassCastException)。
                                             try {
@@ -2880,116 +2896,9 @@ if (hookedAny) Logger.d("hookLiveRerank done pkg=$pkg")
                                             } catch (_: Throwable) {}
                                             if (adpGetLiveSkipDiag < 40) { adpGetLiveSkipDiag++; Logger.d("adpGet skip #$pos noClean") }
                                             return@intercept result
-                                            if (clsQp != null) {
-                                                // 记录脏播放地址 + 挂视频模�?URL getter（画面播放源拦截�?
-                                                val dirtyEnt = Reflect.readAny(clsQp, "mEntity") ?: clsQp
-                                                recordDirtyUrl(dirtyEnt)
-                                                // ①干净视频写进 vm 窗口同槽，当前图读取直接拿到干净�?
-                                                applyWindowClean(pos)
-                                                // ★★★ 窗口已写入干净视频：立即重取当前 pos 的 holder。
-                                                // holder 是在写入前构建的（g3c.a 持有已实例化 Fragment），只有重取才能让
-                                                // 页面从干净窗口重新构建。milanoSkip 前扫 pos+k 超出窗口全返回 null，
-                                                // 这一招直接命中「窗口已干净但 holder 还脏」的死结。
-                                                try {
-                                                    val mInv = m
-                                                    mInv.isAccessible = true
-                                                    val fresh = try { mInv.invoke(chain.thisObject, pos) } catch (_: Throwable) { null }
-                                                    if (fresh != null && fresh !== result) {
-                                                        Logger.d("adpGet freshClean #$pos (${readCaption(clsQp)?.take(10)})")
-                                                        return@intercept fresh
-                                                    }
-                                                    if (fresh != null) Logger.d("adpGet freshSame #$pos (adapter缓存同一实例)")
-                                                } catch (_: Throwable) {}
+                                            } finally {
+                                                adpGetSwapIn = false
                                             }
-                                            // ②dump holder 真身（找 fragment/photo 绑定字段�?
-                                            if (holderDumpCount < 5) { holderDumpCount++; dumpHolderGraph(result, 0) }
-                                            // ③枚�?holder �?Fragment 的空参方法（找重绑方法名�?
-                                            val holderFrag = findFragInHolder(result)
-                                            if (holderFrag != null) diagFragment(holderFrag)
-                                            // ③当前页命中：原�?setCurrentItem(同位�? 强制重实例化显示干净�?
-                                            forceRebindCurrent(pos)
-                                            // ★ 先无条件向前扫干净 holder 换页：writeQpInto 只改 QPhoto 数据，
-                                            // 改不了已实例化的 LivePreviewFragment，普通 feed(1/3/5)直播必须直接换页
-                                            try {
-                                                val mInv = m
-                                                mInv.isAccessible = true
-                                                for (k in 1..200) {
-                                                    val probeHolder = try { mInv.invoke(chain.thisObject, pos + k) } catch (_: Throwable) { null }
-                                                    if (probeHolder == null) continue
-                                                    var probeDirty = false
-                                                    val probeQp = findQpInObject(probeHolder)
-                                                    if (probeQp != null && shouldFilterFeed(probeQp)) probeDirty = true
-                                                    if (!probeDirty) {
-                                                        val frag = Reflect.readAny(probeHolder, "b") ?: findFragInHolder(probeHolder)
-                                                        if (frag != null) {
-                                                            val fn = frag.javaClass.name
-                                                            if (fn.contains("Live") || fn.contains("Ad")) probeDirty = true
-                                                        }
-                                                    }
-                                                    if (!probeDirty) {
-                                                        Logger.d("adpGet skip #$pos -> #${pos + k} k=$k (${readCaption(qp)?.take(10)})")
-                                                        return@intercept probeHolder
-                                                    }
-                                                }
-                                            } catch (t: Throwable) { Logger.d("skipScan err: ${t.javaClass.simpleName}: ${t.message}") }
-                                            try {
-                                                val cleanPos = findCleanPos(pos)
-                                                if (cleanPos >= 0 && cleanPos != pos) {
-                                                    Logger.d("adpGet swap #$pos -> #$cleanPos (${readCaption(qp)?.take(15)})")
-                                                    val cleanHolder = try {
-                                                        val dm = cachedMethod(chain.thisObject.javaClass, m.name, Int::class.javaPrimitiveType!!)
-                                                        dm?.invoke(chain.thisObject, cleanPos)
-                                                    } catch (_: Throwable) { null }
-                                                    if (cleanHolder != null) return@intercept cleanHolder
-                                                } else {
-                                                    // 兜底：把 holder 的照片字段直接换�?T0/U0 源里的干净 QPhoto（vm ret 源是普通视频）
-                                                    val cleanQp = findCleanQp()
-                                                    if (cleanQp != null) {
-                                                        val sw = writeQpInto(result, cleanQp)
-                                                        Logger.d("adpGet holderReswap #$pos ${if (sw > 0) "ok($sw)" else "fail"} (${readCaption(qp)?.take(15)})")
-                                                        if (sw > 0) return@intercept result
-                                                        Logger.d("adpGet postFail pos=$pos sw=$sw cleanQpCls=${cleanQp.javaClass.simpleName}")
-                                                        // Milano �?�?00000)：holder �?Fragment 容器（直�?LivePreviewFragment），QPhoto 替换无效�?
-                                                        // �?adapter 真实 classloader �?hook PageList 数据源，并向前扫干净 holder 直接换页
-                                                        if (pos >= 500000) {
-                                                            val adpCl = chain.thisObject.javaClass.classLoader
-                                                            if (xpRef != null && adpCl != null) {
-                                                                try { hookPageLists(xpRef!!, adpCl) } catch (_: Throwable) {}
-                                                            }
-                                                            // 向前扫最�?200 个位置，返回第一个干净 holder（跳直播/广告页）�?
-                                                            // 直接反射调用原方法（不触发本 hook 重入，与 cleanPos 分支同法�?
-                                                            try {
-                                                                val mInv = m
-                                                                mInv.isAccessible = true
-                                                                for (k in 1..200) {
-                                                                    val probeHolder = try { mInv.invoke(chain.thisObject, pos + k) } catch (_: Throwable) { null }
-                                                                    if (probeHolder == null) continue
-                                                                    // 反转判定：只有「确认脏」（QPhoto 命中 / Fragment 是 Live·Ad）才跳过；
-                                                                    // 空壳或未实例化无法确认脏 = 视为干净直接返回，避免误判导致直播页刷不出来
-                                                                    var probeDirty = false
-                                                                    val probeQp = findQpInObject(probeHolder)
-                                                                    if (probeQp != null && shouldFilterFeed(probeQp)) probeDirty = true
-                                                                    if (!probeDirty) {
-                                                                        val frag = Reflect.readAny(probeHolder, "b") ?: findFragInHolder(probeHolder)
-                                                                        if (frag != null) {
-                                                                            val fn = frag.javaClass.name
-                                                                            if (fn.contains("Live") || fn.contains("Ad")) probeDirty = true
-                                                                        }
-                                                                    }
-                                                                    if (!probeDirty) {
-                                                                        Logger.d("adpGet milanoSkip #$pos -> #${pos + k} k=$k")
-                                                                        return@intercept probeHolder
-                                                                    }
-                                                                    }
-                                                                Logger.d("adpGet milano noCleanHolder pos=$pos")
-                                                    } catch (t: Throwable) { Logger.d("milanoScan err: ${t.javaClass.simpleName}: ${t.message}") }
-
-                                                        }
-                                                    } else {
-                                                        Logger.d("adpGet noClean #$pos hit (${readCaption(qp)?.take(15)})")
-                                                    }
-                                                }
-                                            } finally { adpGetSwapIn = false }
                                         }
                                         // 干净项入池：D 每取一个位置，普通视频就是池子的食粮
                                         if (qp != null && !shouldFilterFeed(qp)) {
@@ -4701,7 +4610,7 @@ if (hookedAny) Logger.d("hookLiveRerank done pkg=$pkg")
             if (aiTagStr != null && aiTagStr.isNotBlank() && aiTagStr != "false" && aiTagStr != "0") { hit("ai:tagStr", qp); return true }
             // "AI" 大小写敏感匹配：ignoreCase 会命中英文单词里的 ai（wait/rain/main）误伤正常视频
             // "ai生成"/"AI创作" 忽略大小写安全：ai/AI 后紧跟中文，英文单词不可能出现该组合
-            if (cap.contains("ai生成", true) || cap.contains("AI创作") || cap.contains("疑似") || cap.contains("AIGC") || cap.contains("人工智能") || Regex("\\bAI\\b|AI[生成制作绘画]|:AI|AI：").containsMatchIn(cap)) { hit("ai:capText", qp); return true }
+            if (cap.contains("ai生成", true) || cap.contains("AI创作") || cap.contains("疑似") || cap.contains("AIGC") || cap.contains("人工智能") || AI_META_REGEX.containsMatchIn(cap)) { hit("ai:capText", qp); return true }
             // ★ 官方作者声明 AI 标记（数据层铁证路径：caption 无标签也能拦，「刷不到」关键）
             val disC = aiDisclaimerContent(pm)
             if (disC != null) { hit("ai:disclaimer \"${disC.take(18)}\"", qp); return true }
@@ -4809,7 +4718,7 @@ if (hookedAny) Logger.d("hookLiveRerank done pkg=$pkg")
             if (Reflect.readBool(ent, "mAiTagForAuthor") == true) return true
             val aiTagStr = try { Reflect.readAny(ent, "mAiTagForAuthor")?.toString() } catch (_: Throwable) { null }
             if (aiTagStr != null && aiTagStr.isNotBlank() && aiTagStr != "false" && aiTagStr != "0") return true
-            if (cap.contains("ai生成", true) || cap.contains("AI创作") || cap.contains("疑似") || cap.contains("AIGC") || cap.contains("人工智能") || Regex("\\bAI\\b|AI[生成制作绘画]|:AI|AI：").containsMatchIn(cap)) return true
+            if (cap.contains("ai生成", true) || cap.contains("AI创作") || cap.contains("疑似") || cap.contains("AIGC") || cap.contains("人工智能") || AI_META_REGEX.containsMatchIn(cap)) return true
             // ★ 官方作者声明 AI 标记（同 decideFeedRaw 判定）
             if (aiDisclaimerContent(pm) != null) return true
         }

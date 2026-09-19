@@ -25,6 +25,8 @@ import kotlin.concurrent.thread
 object DownloadService {
     private const val CH = "slowkick_dl"
     private var seq = 100
+    // ★ 并发去重：快速双击会触发两次同名下载，互踩 tmp/输出导致文件损坏
+    private val active = java.util.Collections.newSetFromMap(java.util.concurrent.ConcurrentHashMap<String, Boolean>())
 
     fun downloadVideo(ctx: Context, info: VideoInfo, dir: String) {
         val candidates = mutableListOf<String>()
@@ -45,6 +47,8 @@ object DownloadService {
         val urls = info.imageUrls
         if (urls.isEmpty()) { toast(ctx, "未捕获到图集图片"); return }
         val base = info.baseName()
+        val guardKey = File(dir, base).absolutePath
+        if (!active.add(guardKey)) { toast(ctx, "该图集已在下载中"); return }
         toast(ctx, "开始下载图集: $base (${urls.size}张)")
         val nid = seq++
         notify(ctx, nid, "准备下载图集: $base", -1)
@@ -55,19 +59,20 @@ object DownloadService {
                 var done = 0
                 for ((idx, url) in urls.withIndex()) {
                     val name = "${base}_${idx + 1}.jpg"
+                    val conn = (URL(url).openConnection() as HttpURLConnection).apply {
+                        connectTimeout = 15000; readTimeout = 30000
+                        setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 12) kwai")
+                        setRequestProperty("Referer", "https://www.kuaishou.com/")
+                    }
                     try {
-                        val conn = (URL(url).openConnection() as HttpURLConnection).apply {
-                            connectTimeout = 15000; readTimeout = 30000
-                            setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 12) kwai")
-                            setRequestProperty("Referer", "https://www.kuaishou.com/")
-                        }
                         conn.connect()
-                        if (conn.responseCode != 200) { Logger.d("DL img fail HTTP ${conn.responseCode}"); conn.disconnect(); continue }
+                        if (conn.responseCode != 200) { Logger.d("DL img fail HTTP ${conn.responseCode}"); continue }
                         val bytes = conn.inputStream.use { it.readBytes() }
-                        conn.disconnect()
                         if (saveImg(bytes, File(outDir, name))) done++
                         notify(ctx, nid, "下载图集 ${done}/${urls.size}", done * 100 / urls.size)
-                    } catch (t: Throwable) { Logger.d("DL img[$idx] error: ${t.message}") }
+                    } catch (t: Throwable) { Logger.d("DL img[$idx] error: ${t.message}") } finally {
+                        try { conn.disconnect() } catch (_: Throwable) {}
+                    }
                 }
                 if (done == 0) { notify(ctx, nid, "图集下载失败", -2); toast(ctx, "图集下载失败"); return@thread }
                 saveMeta(dir, base, info)
@@ -77,6 +82,8 @@ object DownloadService {
                 Logger.d("DL images error: ${t.message}")
                 notify(ctx, nid, "图集下载失败: ${t.message}", -2)
                 toast(ctx, "图集下载失败: ${t.message}")
+            } finally {
+                active.remove(guardKey)
             }
         }
     }
@@ -117,6 +124,8 @@ object DownloadService {
 
     private fun download(ctx: Context, urls: List<String>, name: String, dir: String, info: VideoInfo, audio: Boolean) {
         if (urls.isEmpty()) { toast(ctx, "无可用下载链接"); return }
+        val guardKey = File(dir, name).absolutePath
+        if (!active.add(guardKey)) { toast(ctx, "该文件已在下载中"); return }
         val nid = seq++
         toast(ctx, "开始下载: $name")
         notify(ctx, nid, "准备下载: $name", -1)
@@ -130,14 +139,14 @@ object DownloadService {
                 for ((idx, url) in urls.withIndex()) {
                     if (success) break
                     Logger.d("DL try[${idx + 1}/${urls.size}]: $url")
+                    val conn = (URL(url).openConnection() as HttpURLConnection).apply {
+                        connectTimeout = 15000; readTimeout = 30000
+                        setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 12) kwai")
+                        setRequestProperty("Referer", "https://www.kuaishou.com/")
+                    }
                     try {
-                        val conn = (URL(url).openConnection() as HttpURLConnection).apply {
-                            connectTimeout = 15000; readTimeout = 30000
-                            setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 12) kwai")
-                            setRequestProperty("Referer", "https://www.kuaishou.com/")
-                        }
                         conn.connect()
-                        if (conn.responseCode != 200) { lastErr = "HTTP ${conn.responseCode}"; Logger.d("DL fail $lastErr"); conn.disconnect(); continue }
+                        if (conn.responseCode != 200) { lastErr = "HTTP ${conn.responseCode}"; Logger.d("DL fail $lastErr"); continue }
                         val total = conn.contentLengthLong
                         Logger.d("DL start: $url -> ${out.absolutePath} (audio=$audio, size=$total)")
                         conn.inputStream.use { input ->
@@ -151,22 +160,29 @@ object DownloadService {
                                 }
                             }
                         }
-                        conn.disconnect()
                         success = true
                     } catch (t: Throwable) {
                         lastErr = "${t.javaClass.simpleName}: ${t.message}"
                         Logger.d("DL try[${idx + 1}] error: $lastErr")
+                    } finally {
+                        try { conn.disconnect() } catch (_: Throwable) {}
                     }
                 }
-                if (!success) { notify(ctx, nid, "失败: $lastErr", -2); toast(ctx, "下载失败: $lastErr"); return@thread }
+                if (!success) {
+                    tmp.delete()  // ★ 失败清残留，否则 .tmp 永久堆积
+                    notify(ctx, nid, "失败: $lastErr", -2); toast(ctx, "下载失败: $lastErr"); return@thread
+                }
 
                 if (audio && info.audioUrl == null) {
-                    tmp.renameTo(File(dir, "$name.vid.tmp"))
                     val vidTmp = File(dir, "$name.vid.tmp")
+                    tmp.renameTo(vidTmp)
                     extractAudio(vidTmp, out)
                     vidTmp.delete()
                 } else {
-                    tmp.renameTo(out)
+                    // ★ renameTo 在目标已存在时静默失败（返回 false 不抛异常），
+                    // 会报「完成」但落盘的是上一次的旧文件
+                    if (out.exists()) out.delete()
+                    if (!tmp.renameTo(out)) { tmp.copyTo(out, overwrite = true); tmp.delete() }
                 }
                 Logger.d("DL ok: ${out.absolutePath}")
                 notify(ctx, nid, "完成: $name (${out.length() / 1024}KB)", 100)
@@ -176,6 +192,8 @@ object DownloadService {
                 Logger.d("DL error: ${t.javaClass.name}: ${t.message}")
                 notify(ctx, nid, "失败: ${t.message}", -2)
                 toast(ctx, "下载失败: ${t.message}")
+            } finally {
+                active.remove(guardKey)
             }
         }
     }
@@ -186,33 +204,41 @@ object DownloadService {
 
     private fun extractAudio(src: File, dst: File) {
         val extractor = MediaExtractor()
-        extractor.setDataSource(src.absolutePath)
-        var audioTrack = -1
-        for (i in 0 until extractor.trackCount) {
-            val fmt = extractor.getTrackFormat(i)
-            val mime = fmt.getString(MediaFormat.KEY_MIME) ?: continue
-            if (mime.startsWith("audio/")) { audioTrack = i; break }
+        var muxer: MediaMuxer? = null
+        // ★ try/finally 兜底释放：原实现中途抛异常（无音轨/写样本失败）时
+        // extractor/muxer 全泄漏，dst 留下半截文件
+        try {
+            extractor.setDataSource(src.absolutePath)
+            var audioTrack = -1
+            for (i in 0 until extractor.trackCount) {
+                val fmt = extractor.getTrackFormat(i)
+                val mime = fmt.getString(MediaFormat.KEY_MIME) ?: continue
+                if (mime.startsWith("audio/")) { audioTrack = i; break }
+            }
+            if (audioTrack < 0) { Logger.d("no audio track"); return }
+            extractor.selectTrack(audioTrack)
+            val outFmt = extractor.getTrackFormat(audioTrack)
+            muxer = MediaMuxer(dst.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+            val outTrack = muxer.addTrack(outFmt)
+            muxer.start()
+            val buf = ByteBuffer.allocate(256 * 1024)
+            val info = android.media.MediaCodec.BufferInfo()
+            while (true) {
+                buf.clear()
+                val size = extractor.readSampleData(buf, 0)
+                if (size < 0) break
+                info.offset = 0; info.size = size
+                info.presentationTimeUs = extractor.sampleTime
+                info.flags = extractor.sampleFlags
+                buf.limit(size)
+                muxer.writeSampleData(outTrack, buf, info)
+                extractor.advance()
+            }
+            muxer.stop()
+        } finally {
+            try { muxer?.release() } catch (_: Throwable) {}
+            try { extractor.release() } catch (_: Throwable) {}
         }
-        if (audioTrack < 0) { Logger.d("no audio track"); return }
-        extractor.selectTrack(audioTrack)
-        val outFmt = extractor.getTrackFormat(audioTrack)
-        val muxer = MediaMuxer(dst.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
-        val outTrack = muxer.addTrack(outFmt)
-        muxer.start()
-        val buf = ByteBuffer.allocate(256 * 1024)
-        val info = android.media.MediaCodec.BufferInfo()
-        while (true) {
-            buf.clear()
-            val size = extractor.readSampleData(buf, 0)
-            if (size < 0) break
-            info.offset = 0; info.size = size
-            info.presentationTimeUs = extractor.sampleTime
-            info.flags = extractor.sampleFlags
-            buf.limit(size)
-            muxer.writeSampleData(outTrack, buf, info)
-            extractor.advance()
-        }
-        muxer.stop(); muxer.release(); extractor.release()
     }
 
     private fun saveMeta(dir: String, name: String, info: VideoInfo) {

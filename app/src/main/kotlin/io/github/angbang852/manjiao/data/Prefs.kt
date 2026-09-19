@@ -3,6 +3,7 @@ package io.github.angbang852.manjiao.data
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
+import io.github.angbang852.manjiao.KsClass
 import io.github.angbang852.manjiao.util.Logger
 import java.io.File
 import java.util.Properties
@@ -13,6 +14,8 @@ object Prefs {
     const val ACTION_WRITE = "io.github.angbang852.manjiao.PREFS_WRITE"
     const val ACTION_QUERY = "io.github.angbang852.manjiao.PREFS_QUERY"
     const val ACTION_PULL = "io.github.angbang852.manjiao.PREFS_PULL"
+    /** signature 级自定义权限：快手进程内的配置接收器只接受持有者（本模块）的广播 */
+    const val PERM_SYNC = "io.github.angbang852.manjiao.permission.PREFS_SYNC"
     private const val OWN_PKG = "io.github.angbang852.manjiao"
     private const val MEDIA_DIR = "/sdcard/Android/media/io.github.angbang852.manjiao"
     private const val MEDIA_FILE = "$MEDIA_DIR/slowkick.properties"
@@ -390,7 +393,12 @@ object Prefs {
                     i.putExtra("value", arr)
                 }
             }
-            ctx.sendBroadcast(i)
+            // ★ 限定只投递给两个快手包：UPDATE 广播携带用户全部偏好，隐式发送可被
+            // 任意第三方 app 注册同名 action 监听（配置嗅探）。显式 setPackage 后
+            // 仅快手/极速版进程可达；快手侧接收器另有 signature 权限防伪造注入
+            for (pkg in arrayOf(KsClass.PKG, KsClass.PKG_NEBULA)) {
+                try { ctx.sendBroadcast(Intent(i).setPackage(pkg)) } catch (_: Throwable) {}
+            }
         } catch (_: Throwable) {}
     }
 

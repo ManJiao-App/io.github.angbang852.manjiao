@@ -22,12 +22,16 @@ object PlaybackHook {
         Logger.d("PlaybackHook: hook() called")
         hookLoop(xp, cl)
         hookBgPause(xp, cl)
+        // ★ 上限 + daemon：目标类不存在（宿主改名/插件化）时原线程每 2s 空转
+        // 永不退出（电量/CPU 常驻税）；120 次 ≈ 4 分钟后放弃
         Thread {
-            while (!delayedHooked) {
+            var tries = 0
+            while (!delayedHooked && tries < 120) {
+                tries++
                 try { Thread.sleep(2000) } catch (_: Throwable) {}
                 try { delayedHookAemon(xp, cl) } catch (t: Throwable) { Logger.d("pb delayed fail: ${t.message}") }
             }
-        }.start()
+        }.also { it.isDaemon = true }.start()
     }
 
     private fun delayedHookAemon(xp: XposedInterface, cl: ClassLoader) {
@@ -64,8 +68,12 @@ object PlaybackHook {
             xp.hook(mSeek).setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
                 .setId("pb.aemon.seekTo").intercept { chain ->
                     val pos = chain.args.getOrNull(0)
-                    if (Prefs.bool(Prefs.K_PB_NO_LOOP, false) && pos == 0) {
-                        Logger.d("pb: BLOCK seekTo(0) (noLoop)")
+                    // ★ 只拦「播放结束后的自动回跳」（与 start 拦截共用 1s 窗口）：
+                    // 无差别拦 seekTo(0) 会把用户手动把进度条拖回片头也吞掉
+                    if (Prefs.bool(Prefs.K_PB_NO_LOOP, false) && pos == 0 &&
+                        System.currentTimeMillis() - lastCompletionMs < 1000
+                    ) {
+                        Logger.d("pb: BLOCK seekTo(0) (noLoop auto-rewind)")
                         return@intercept null
                     }
                     chain.proceed()
@@ -179,19 +187,5 @@ object PlaybackHook {
             mPause.invoke(p)
             Logger.d("pb: bg paused player")
         } catch (t: Throwable) { Logger.d("pb pause fail: ${t.message}") }
-    }
-
-    private fun findPlayer(root: View): Any? {
-        if (root.javaClass.name.contains("KwaiRepresentation") || root.javaClass.name.contains("VideoPlayer")) {
-            return root
-        }
-        if (root is ViewGroup) {
-            for (i in 0 until root.childCount) {
-                val child = root.getChildAt(i) ?: continue
-                val p = findPlayer(child)
-                if (p != null) return p
-            }
-        }
-        return null
     }
 }

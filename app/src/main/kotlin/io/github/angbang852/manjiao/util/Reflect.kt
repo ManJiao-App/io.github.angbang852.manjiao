@@ -36,7 +36,10 @@ object Reflect {
         if (obj == null) return null
         val start = obj.javaClass
         for (n in names) {
-            val key = start.name + "#" + n
+            // ★ 键含 classloader 身份：快手插件化会把同名类装进第二个 loader，
+            // 按类名做键会让 A loader 的 Field 缓存污染 B loader（get 抛
+            // IllegalArgumentException → 恒 null 且永不重解析）
+            val key = start.name + "@" + System.identityHashCode(start.classLoader) + "#" + n
             val cached = fieldCache[key]
             if (cached != null) return try { cached.get(obj) } catch (_: Throwable) { null }
             if (negCache.contains(key)) continue
@@ -119,8 +122,8 @@ object Reflect {
 
     fun findMethod(cls: Class<*>, name: String, argCount: Int): Method? {
         // ★ Method 查找缓存：declaredMethods/methods 每次调用都复制整个方法表，
-        // 每秒多次调用的路径缓存后 O(1)；键含参数个数（原语义就是宽松匹配）
-        val key = cls.name + "#" + name + "#" + argCount
+        // 每秒多次调用的路径缓存后 O(1)；键含参数个数与 classloader 身份（原语义就是宽松匹配）
+        val key = cls.name + "@" + System.identityHashCode(cls.classLoader) + "#" + name + "#" + argCount
         if (!negMethodCache.contains(key)) {
             methodCache[key]?.let { return it }
             var c: Class<*>? = cls
@@ -138,7 +141,7 @@ object Reflect {
     fun callMethod(obj: Any?, name: String, vararg args: Any?): Any? {
         if (obj == null) return null
         val cls = obj.javaClass
-        val key = cls.name + "#" + name + "#" + args.size
+        val key = cls.name + "@" + System.identityHashCode(cls.classLoader) + "#" + name + "#" + args.size
         if (!negMethodCache.contains(key)) {
             val cached = methodCache[key]
             if (cached != null) return try { cached.invoke(obj, *args) } catch (_: Throwable) { null }
@@ -161,7 +164,7 @@ object Reflect {
     fun callMethodTyped(obj: Any?, name: String, argTypes: Array<Class<*>>, args: Array<Any?>): Any? {
         if (obj == null) return null
         val cls = obj.javaClass
-        val key = cls.name + "#" + name + "#" + argTypes.joinToString(",") { it.name }
+        val key = cls.name + "@" + System.identityHashCode(cls.classLoader) + "#" + name + "#" + argTypes.joinToString(",") { it.name }
         if (!negMethodCache.contains(key)) {
             val cached = methodCache[key]
             if (cached != null) return try { cached.invoke(obj, *args) } catch (_: Throwable) { null }

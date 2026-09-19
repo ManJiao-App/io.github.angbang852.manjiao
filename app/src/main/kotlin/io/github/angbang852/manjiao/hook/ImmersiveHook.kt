@@ -259,7 +259,11 @@ object ImmersiveHook {
             if (onlyGoldOn()) {
                 val actRef = act
                 for (gn in GOLD_FAST_IDS) {
-                    val gid = actRef.resources.getIdentifier(gn, "id", "com.smile.gifmaker")
+                    // ★ 双命名空间兜底：硬编码主包命名空间在极速版（com.kuaishou.nebula）
+                    // 上若资源表已随包名改名则恒返回 0，金币快速隐藏整体静默失效。
+                    // 先查当前进程包名，未命中再回退主包（主包行为不变，极速版只增不减）
+                    val gid = actRef.resources.getIdentifier(gn, "id", actRef.packageName)
+                        .takeIf { it != 0 } ?: actRef.resources.getIdentifier(gn, "id", KsClass.PKG)
                     if (gid != 0) {
                         val gv = actRef.findViewById(gid) as? View
                         if (gv != null && gv.visibility != View.GONE) { gv.visibility = View.GONE; c2++ }
@@ -666,7 +670,9 @@ object ImmersiveHook {
             if (isVideoView(v)) return@walk
             val m = try { matchHideItem(v, topbar, right, other, w, h, loc) } catch (_: Throwable) { null }
             if (m != null) {
-                Logger.d("imm M item=${m.item} cls=${v.javaClass.simpleName} id=$<IDNAMEOF> x=${m.absX} y=${m.absY} w=${v.width} h=${v.height}")
+                // 惰性求值：quiet 时零成本（原行 $<IDNAMEOF> 是批量替换事故残留，
+                // 会把占位符字面打进日志，改回 idNameOf 并入惰性 lambda）
+                Logger.d({ "imm M item=${m.item} cls=${v.javaClass.simpleName} id=${idNameOf(v)} x=${m.absX} y=${m.absY} w=${v.width} h=${v.height}" })
                 if (m.byIdRight) {
                     v.visibility = View.GONE; v.tag = HIDDEN_TAG; count++
                 } else if (hideTopItem(v, root, w, h, m.isRight || m.isRightArea, m.absY)) {

@@ -46,7 +46,9 @@ data class VideoInfo(
             if (id != null) sb.append("ks_").append(id)
             else sb.append("ks_").append(System.currentTimeMillis() / 1000)
         }
-        return sb.toString().trimEnd('_')
+        // ★ ext4 单文件名分量上限 255 字节（中文/emoji 按字符 3-4 字节算），
+        // 超长昵称会让下载必失败——整体截断兜底
+        return sb.toString().take(80).trimEnd('_')
     }
 
     fun videoFileName() = baseName() + ".mp4"
