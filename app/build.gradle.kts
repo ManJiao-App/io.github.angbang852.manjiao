@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -16,19 +18,39 @@ android {
         externalNativeBuild { cmake { cppFlags += "-std=c++17" } }
     }
     externalNativeBuild { cmake { path = file("src/main/cpp/CMakeLists.txt") } }
+    // ★ 签名密钥出库：密码此前明文提交在仓库中（git 历史已暴露，建议尽快 rotate）。
+    // 现从 local.properties 读取（该文件在 .gitignore 内），需包含：
+    //   manjiao.storeFile=D:/path/to/release-manjiao.keystore
+    //   manjiao.storePassword=xxx
+    //   manjiao.keyAlias=manjiao
+    //   manjiao.keyPassword=xxx
+    // keystore 缺失时 release 构建产出 unsigned APK（不再因路径失效直接报错）
+    val signingProps = Properties().apply {
+        val f = rootProject.file("local.properties")
+        // UTF-8 Reader：storeFile 路径含中文，Properties.load(InputStream) 默认
+        // ISO-8859-1 会乱码导致 exists() 恒 false
+        if (f.exists()) f.reader(Charsets.UTF_8).use { load(it) }
+    }
     signingConfigs {
         create("release") {
-            storeFile = file("E:/文档/Deepseek Harness EAC/工具/密钥/签名密钥/release-manjiao.keystore")
-            storePassword = "REDACTED"
-            keyAlias = "manjiao"
-            keyPassword = "REDACTED"
+            val sf = signingProps.getProperty("manjiao.storeFile") ?: ""
+            if (sf.isNotEmpty() && file(sf).exists()) {
+                storeFile = file(sf)
+                storePassword = signingProps.getProperty("manjiao.storePassword") ?: ""
+                keyAlias = signingProps.getProperty("manjiao.keyAlias") ?: "manjiao"
+                keyPassword = signingProps.getProperty("manjiao.keyPassword") ?: ""
+            }
         }
     }
     buildTypes {
         release {
-            isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("release")
+            // ★ R8 开启：Xposed 模块按名反射点已由 proguard-rules.pro 保护
+            //（Module 入口 / libxposed API / JNI native 方法）
+            isMinifyEnabled = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            if (signingConfigs.getByName("release").storeFile != null) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
     compileOptions {
