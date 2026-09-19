@@ -109,6 +109,7 @@ object ImmersiveHook {
     private val quickHide = Runnable {
         val act = tracked
         if (act != null && active) Logger.safe("immQuick") { hideByConfig(act) }
+        vtreeDirty = false
     }
 
     private fun scheduleQuickHide() {
@@ -117,13 +118,26 @@ object ImmersiveHook {
         handler.postDelayed(quickHide, 250)
     }
 
-    private val scrollListener = ViewTreeObserver.OnScrollChangedListener { scheduleQuickHide() }
-    private val layoutListener = ViewTreeObserver.OnGlobalLayoutListener { scheduleQuickHide() }
+    // ★ 无变化跳过全树遍历：滚动/布局事件置脏；hideTask 周期 pass 在「模式未变且
+    // 视图树无变化」时直接跳过 walkAll（配置切换走 mode 比对，仍会执行）。
+    // 全树 walkAll 一次几千个 View，是沉浸模式下的常驻主线程开销
+    @Volatile private var vtreeDirty = true
+
+    private val scrollListener = ViewTreeObserver.OnScrollChangedListener { vtreeDirty = true; scheduleQuickHide() }
+    private val layoutListener = ViewTreeObserver.OnGlobalLayoutListener { vtreeDirty = true; scheduleQuickHide() }
 
     private val hideTask = object : Runnable {
         override fun run() {
             val act = tracked
-            if (act != null) hideByConfig(act)
+            if (act != null) {
+                // 只比模式（内存 Prefs 读取，微秒级）；模式变了或有布局/滚动变化才全树
+                val modeNow = if (Prefs.bool(Prefs.K_IMM_ON, false)) 1
+                    else if (Prefs.bool(Prefs.K_IMM_CUSTOM, false) || anyCustomSubOn()) 2 else 0
+                if (modeNow != lastMode || vtreeDirty || firstRestore) {
+                    vtreeDirty = false
+                    hideByConfig(act)
+                }
+            }
             // 全关时降频轮询（只读 Prefs 判断 mode，零遍历）；有开关开启才高频跑
             if (active) handler.postDelayed(this, if (lastMode == 0) 3000 else if (onlyGoldOn()) 5000 else 2500)
         }

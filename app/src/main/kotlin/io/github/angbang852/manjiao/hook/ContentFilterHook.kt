@@ -19,6 +19,8 @@ object ContentFilterHook {
     private val handler = Handler(Looper.getMainLooper())
     private val AD_TEXTS = arrayOf("广告", "赞助", "sponsored", "推广")
     private val AI_TEXTS = arrayOf("AI生成", "AI制作", "ai生成", "疑似含AI", "AI创作")
+    // shouldFilterMeta 用（每 10s 一次）：Regex 预编译，不随调用重建
+    private val AI_META_REGEX = Regex("\\bAI\\b|AI[生成制作绘画]|:AI|AI：")
     private val DRAMA_IDS = arrayOf("tube_panel", "serial", "element_tube_tk_action", "group_bottom_root", "feed_set", "collection")
     private val DRAMA_TEXTS = arrayOf("看全集", "文娱榜", "选集", "上集", "下集", "全剧", "剧集", "正片")
     private val MOVIE_HINT = arrayOf("电影", "电视剧", "影视", "解说", "剪辑", "全集", "第", "集", "剧")
@@ -136,6 +138,9 @@ object ContentFilterHook {
     private fun hookKrnProbe(xp: XposedInterface, cl: ClassLoader) {
         if (krnProbeHooked) return
         krnProbeHooked = true
+        // ★ 纯探针（只打日志不改变行为）：静默模式（默认）不安装，省掉 KrnFragment
+        // 5 个生命周期 hook 的常驻开销；排查 KRN 问题时把 日志静默 关掉重启即恢复
+        if (Logger.quiet) return
         val clRef = cl
         val retry = object : Runnable {
             override fun run() {
@@ -1163,7 +1168,8 @@ if (hookedAny) Logger.d("hookLiveRerank done pkg=$pkg")
 
     private fun laStack(tag: String) {
         val n = laLogN.incrementAndGet()
-        if (n > 20) return
+        // 抓栈成本高且纯诊断：quiet（默认开）时直接跳过
+        if (Logger.quiet || n > 20) return
         try {
             val st = Throwable().stackTrace
             val sb = StringBuilder("LAWATCH #$n $tag stack:")
@@ -1249,7 +1255,7 @@ if (hookedAny) Logger.d("hookLiveRerank done pkg=$pkg")
 
     private fun trueStack(tag: String) {
         val n = trueListLogN.incrementAndGet()
-        if (n > 20) return
+        if (Logger.quiet || n > 20) return
         try {
             val st = Thread.currentThread().stackTrace
             val sb = StringBuilder("TRUEWATCH #$n $tag stack:")
@@ -1289,8 +1295,7 @@ if (hookedAny) Logger.d("hookLiveRerank done pkg=$pkg")
                 var c: Class<*>? = holder.javaClass
                 var lvl = 0
                 while (c != null && c != Any::class.java && lvl < 2) {
-                    for (f in c!!.declaredFields) {
-                        if (java.lang.reflect.Modifier.isStatic(f.modifiers)) continue
+                    for (f in Reflect.nonStaticFields(c!!)) {
                         // 系统结构字段黑名单：lifecycle/Fragment 管理/拦截器列表绝不碰
                         val fn0 = f.name
                         if (fn0.contains("Lifecycle") || fn0.contains("FragmentManager") ||
@@ -1415,13 +1420,20 @@ if (hookedAny) Logger.d("hookLiveRerank done pkg=$pkg")
         override fun run() {
             val act = tracked ?: return
             check(act)
-            if (tracked != null) handler.postDelayed(this, 350)
+            // 1500ms：check 内部自带 5s/10s 节流，轮询本身只需兜底醒来，
+            // 350ms 的空转唤醒纯属浪费（改动前每秒近 3 次主线程调度）
+            if (tracked != null) handler.postDelayed(this, 1500)
         }
     }
 
     private var lastPagerSearch = 0L
     private fun check(act: Activity) {
         Logger.safe("findPagerInCheck") {
+            // ★ pager 已定位且仍挂在窗口上：整个搜索块直接跳过（此前缓存有效时
+            // 每 5 秒仍白跑一次 getIdentifier + findViewById）。仅在缓存缺失或
+            // 脱离窗口时按 5 秒节流重新搜索
+            val pc = pagerCache
+            if (pc != null && (pc as? android.view.View)?.isAttachedToWindow == true) return@safe
             val now = System.currentTimeMillis()
             if (now - lastPagerSearch > 5000) {
                 lastPagerSearch = now
@@ -1432,8 +1444,8 @@ if (hookedAny) Logger.d("hookLiveRerank done pkg=$pkg")
                         if (v != null) findPager(v)
                     }
                 } catch (_: Throwable) {}
-                val pc = pagerCache
-                if (pc == null || (pc as? android.view.View)?.isAttachedToWindow != true) {
+                val pc2 = pagerCache
+                if (pc2 == null || (pc2 as? android.view.View)?.isAttachedToWindow != true) {
                     val decor = act.window.decorView as? ViewGroup
                     if (decor != null) findPager(decor)
                 }
@@ -2401,9 +2413,7 @@ if (hookedAny) Logger.d("hookLiveRerank done pkg=$pkg")
                                 if (clean != null) {
                                     f.set(frag, clean)
                                     try {
-                                        val sm = vm.javaClass.getDeclaredMethod("J1", qpClass, Boolean::class.javaPrimitiveType)
-                                        sm.isAccessible = true
-                                        sm.invoke(vm, clean, true)
+                                        cachedMethod(vm.javaClass, "J1", qpClass, Boolean::class.javaPrimitiveType!!)?.invoke(vm, clean, true)
                                     } catch (_: Throwable) {}
                                     Logger.d("frag M replaced: ${cap?.take(20)} -> ${readCaption(clean)?.take(20)}")
                                 }
@@ -2927,9 +2937,8 @@ if (hookedAny) Logger.d("hookLiveRerank done pkg=$pkg")
                                                 if (cleanPos >= 0 && cleanPos != pos) {
                                                     Logger.d("adpGet swap #$pos -> #$cleanPos (${readCaption(qp)?.take(15)})")
                                                     val cleanHolder = try {
-                                                        val dm = chain.thisObject.javaClass.getDeclaredMethod(m.name, Int::class.javaPrimitiveType)
-                                                        dm.isAccessible = true
-                                                        dm.invoke(chain.thisObject, cleanPos)
+                                                        val dm = cachedMethod(chain.thisObject.javaClass, m.name, Int::class.javaPrimitiveType!!)
+                                                        dm?.invoke(chain.thisObject, cleanPos)
                                                     } catch (_: Throwable) { null }
                                                     if (cleanHolder != null) return@intercept cleanHolder
                                                 } else {
@@ -3224,9 +3233,22 @@ if (hookedAny) Logger.d("hookLiveRerank done pkg=$pkg")
         }
     }
 
+    // ★ Method 查找缓存：rebind/jumpNext/frag 替换/refresh 命中路径的
+    // getDeclaredMethod 每次全类方法表查找+复制，缓存后 O(1)；查不到不缓存
+    //（方法缺失说明类结构变化，自然重查）
+    private val methodCache = java.util.concurrent.ConcurrentHashMap<String, java.lang.reflect.Method>()
+    private fun cachedMethod(cls: Class<*>, name: String, vararg pt: Class<*>): java.lang.reflect.Method? {
+        val key = cls.name + "#" + name + "#" + pt.size + "#" + pt.joinToString(",") { it.name }
+        methodCache[key]?.let { return it }
+        val m = try { cls.getDeclaredMethod(name, *pt) } catch (_: Throwable) { null } ?: return null
+        m.isAccessible = true
+        methodCache[key] = m
+        return m
+    }
+
     private fun findQpInObject(obj: Any, depth: Int = 0): Any? {
         val qpClass = qpClassRef ?: return null
-        if (qpClass.isAssignableFrom(obj.javaClass)) return obj
+        if (qpClass.isInstance(obj)) return obj
         if (depth >= 2) return null
 
         if (obj is Collection<*>) {
@@ -3238,15 +3260,15 @@ if (hookedAny) Logger.d("hookLiveRerank done pkg=$pkg")
             }
             return null
         }
+        // ★ 反射成本核心优化：字段表按类缓存（Reflect.nonStaticFields），不再每次
+        // declaredFields 复制数组；isAssignableFrom→isInstance 少一层类查找
         var c: Class<*>? = obj.javaClass
         var lvl = 0
         while (c != null && c != Any::class.java && lvl < 3) {
-            for (f in c!!.declaredFields) {
-                if (java.lang.reflect.Modifier.isStatic(f.modifiers)) continue
+            for (f in Reflect.nonStaticFields(c!!)) {
                 try {
-                    f.isAccessible = true
                     val v = f.get(obj) ?: continue
-                    if (qpClass.isAssignableFrom(v.javaClass)) return v
+                    if (qpClass.isInstance(v)) return v
                     if (depth < 1 && v.javaClass.name.contains(".") && !v.javaClass.name.startsWith("java.") && !v.javaClass.name.startsWith("android.")) {
                         val r = findQpInObject(v, depth + 1)
                         if (r != null) return r
@@ -3284,10 +3306,8 @@ if (hookedAny) Logger.d("hookLiveRerank done pkg=$pkg")
         var c: Class<*>? = holder.javaClass
         var lvl = 0
         while (c != null && c != Any::class.java && lvl < 3) {
-            for (f in c!!.declaredFields) {
-                if (java.lang.reflect.Modifier.isStatic(f.modifiers)) continue
+            for (f in Reflect.nonStaticFields(c!!)) {
                 try {
-                    f.isAccessible = true
                     val v = f.get(holder) ?: continue
                     if (v === holder) continue
                     val vn = v.javaClass.name
@@ -3333,18 +3353,12 @@ if (hookedAny) Logger.d("hookLiveRerank done pkg=$pkg")
             }
         }
         if (nextQp == null) { Logger.d("jumpNext no clean video"); return }
-        try {
-            val m = vm.javaClass.getDeclaredMethod("o", qpClass)
-            m.isAccessible = true; m.invoke(vm, nextQp); Logger.d("jumpNext showed via o"); return
-        } catch (_: Throwable) {}
-        try {
-            val m = vm.javaClass.getDeclaredMethod("J1", qpClass, Boolean::class.javaPrimitiveType)
-            m.isAccessible = true; m.invoke(vm, nextQp, true); Logger.d("jumpNext showed via J1"); return
-        } catch (_: Throwable) {}
-        try {
-            val m = vm.javaClass.getDeclaredMethod("O1", qpClass, String::class.java)
-            m.isAccessible = true; m.invoke(vm, nextQp, ""); Logger.d("jumpNext showed via O1"); return
-        } catch (_: Throwable) {}
+        val mo = cachedMethod(vm.javaClass, "o", qpClass)
+        if (mo != null) { try { mo.invoke(vm, nextQp); Logger.d("jumpNext showed via o"); return } catch (_: Throwable) {} }
+        val mj = cachedMethod(vm.javaClass, "J1", qpClass, Boolean::class.javaPrimitiveType!!)
+        if (mj != null) { try { mj.invoke(vm, nextQp, true); Logger.d("jumpNext showed via J1"); return } catch (_: Throwable) {} }
+        val ms = cachedMethod(vm.javaClass, "O1", qpClass, String::class.java)
+        if (ms != null) { try { ms.invoke(vm, nextQp, ""); Logger.d("jumpNext showed via O1"); return } catch (_: Throwable) {} }
         Logger.d("jumpNext no show method")
     }
 
@@ -3598,6 +3612,11 @@ if (hookedAny) Logger.d("hookLiveRerank done pkg=$pkg")
     private val cleanExecutor = java.util.concurrent.Executors.newSingleThreadExecutor { r ->
         Thread(r, "ManJiaoClean").apply { isDaemon = true }
     }
+    // ★ keep-latest 合并：单次全图清洗可达秒级，500ms 节流后队列仍会积压过期任务
+    //（都是重复清洗同一 VM）。同一时刻只保留最新待清洗对象，跑完再取最新——
+    // 队列深度从无界变为至多 2，过期货全部丢弃
+    private val pendingCleanObj = java.util.concurrent.atomic.AtomicReference<Any?>()
+    private val cleanDrainArmed = java.util.concurrent.atomic.AtomicBoolean(false)
     private fun filterVmLists(obj: Any) {
         if (liveTop) return
         val now = System.currentTimeMillis()
@@ -3605,7 +3624,14 @@ if (hookedAny) Logger.d("hookLiveRerank done pkg=$pkg")
         lastFilterVmListsAt = now
         // 一次性探针：确认 vmRef 状态与真源清洗是否激活（查「大青蜜桃」在屏滞留）
         if (!vmRefProbeDone) { vmRefProbeDone = true; Logger.always("VMPROBE filterVmLists armed: vm=${obj.javaClass.name}") }
-        cleanExecutor.execute { filterVmListsInner(obj) }
+        pendingCleanObj.set(obj)
+        if (cleanDrainArmed.compareAndSet(false, true)) {
+            cleanExecutor.execute {
+                cleanDrainArmed.set(false)
+                val target = pendingCleanObj.getAndSet(null) ?: return@execute
+                filterVmListsInner(target)
+            }
+        }
     }
     private fun filterVmListsInner(obj: Any) {
         Logger.safe("filterVmLists") {
@@ -3638,8 +3664,7 @@ if (hookedAny) Logger.d("hookLiveRerank done pkg=$pkg")
                 var c1: Class<*>? = obj.javaClass
                 var l1 = 0
                 while (c1 != null && c1 != Any::class.java && l1 < 5) {
-                    for (f1 in c1!!.declaredFields) {
-                        if (java.lang.reflect.Modifier.isStatic(f1.modifiers)) continue
+                    for (f1 in Reflect.nonStaticFields(c1!!)) {
                         try {
                             f1.isAccessible = true
                             val v1 = f1.get(obj) ?: continue
@@ -3648,8 +3673,7 @@ if (hookedAny) Logger.d("hookLiveRerank done pkg=$pkg")
                             var c2: Class<*>? = v1.javaClass
                             var l2 = 0
                             while (c2 != null && c2 != Any::class.java && l2 < 3) {
-                                for (f2 in c2!!.declaredFields) {
-                                    if (java.lang.reflect.Modifier.isStatic(f2.modifiers)) continue
+                                for (f2 in Reflect.nonStaticFields(c2!!)) {
                                     try {
                                         f2.isAccessible = true
                                         val v2 = f2.get(v1)
@@ -3852,12 +3876,21 @@ if (hookedAny) Logger.d("hookLiveRerank done pkg=$pkg")
         var removed = 0
         for (a in args) {
             if (a is MutableList<*>) {
-                val hits = a.filter { it != null && shouldFilterFeed(it) }
+                // ★ 零分配干净路径：绝大多数列表无脏项，filter 的 ArrayList 分配
+                // （每次列表变异一次）改为命中才建列表
+                var hitList: ArrayList<Any?>? = null
+                for (el in a) {
+                    if (el != null && shouldFilterFeed(el)) {
+                        if (hitList == null) hitList = ArrayList()
+                        hitList.add(el)
+                    }
+                }
+                val hits = hitList
                 // 绝不清空：多元素列表保留最后一条，防 adapter 数据列表空导致崩溃。
                 // ★ 例外：单条目全脏批次（实测 LADUMP size=1 {LiveStreamFeed=1} 3次）护栏必放行
                 // → 直播上屏后后台补剔晚于视图挂载。size=1 时删空=方法收到空列表=追加语义下
                 // 不插入=最上游拦截；清空后由下方 prefetch(阈值4)+快手翻页填补
-                if (hits.isNotEmpty() && (a.size - hits.size >= 1 || a.size == 1)) {
+                if (hits != null && (a.size - hits.size >= 1 || a.size == 1)) {
                     val cap0 = readCaption(hits.first())
                     // ★ 直接删除脏项不补位：补位池耗尽后轮转退化会反复取同一条旧视频=重复刷到。
                     // 列表短暂缩水由 prefetch(阈值4)+快手自身翻页填补，无重复
@@ -3868,7 +3901,7 @@ if (hookedAny) Logger.d("hookLiveRerank done pkg=$pkg")
                     removed += deleted
                     Logger.d("feed filtered del=$deleted left=${a.size} first: ${cap0?.take(30)}")
                     // 调用链取证（限流）：直播卡片「先渲染后删除」漏拦路径定位用
-                    if (fltCallerDiag < 20) {
+                    if (!Logger.quiet && fltCallerDiag < 20) {
                         fltCallerDiag++
                         Logger.d("fltCaller: " + Thread.currentThread().stackTrace.drop(2).take(8)
                             .joinToString(" <- ") { it.className.substringAfterLast('.') + "." + it.methodName })
@@ -4122,9 +4155,8 @@ if (hookedAny) Logger.d("hookLiveRerank done pkg=$pkg")
         val vm = vmRef
         if (vm == null) { Logger.always("refresh SKIP: vmRef=null (VM not found yet)"); return false }
         for (name in arrayOf("v0", "B1", "C1", "E1", "K1", "W0", "X0", "Y0", "z0", "y0", "refresh", "loadMore")) {
-            val m = try { vm.javaClass.getDeclaredMethod(name) } catch (_: Throwable) { null } ?: continue
+            val m = cachedMethod(vm.javaClass, name) ?: continue
             try {
-                m.isAccessible = true
                 m.invoke(vm)
                 Logger.d("refresh called: $name")
                 return true
@@ -4239,6 +4271,13 @@ if (hookedAny) Logger.d("hookLiveRerank done pkg=$pkg")
     fun invalidateFilterCache() {
         feedFilterCache.clear()
         contentFilterCache.clear()
+        // ★ 配置变化必须连带清签名缓存：此前只清 identity 弱缓存，sig 缓存里
+        // 旧开关组合的判定结果残留（如 AI 开着时的 true），用户关开关后旧项
+        // 仍被过滤直到缓存超限 clear——开关「关不掉」的根因之一
+        feedSigCache.clear()
+        contentSigCache.clear()
+        sigIdCache.clear()
+        asyncDecidePending.clear()
     }
     fun refreshContent(): Boolean {
         synchronized(seenPhotoIds) { seenPhotoIds.clear() }
@@ -4342,6 +4381,10 @@ if (hookedAny) Logger.d("hookLiveRerank done pkg=$pkg")
     }
     private fun decideBySig(cache: java.util.concurrent.ConcurrentHashMap<String, Boolean>, qp: Any, decide: () -> Boolean): Boolean {
         if (!Prefs.bool(Prefs.K_PERF_FCACHE, true)) return decide()
+        // ★ sigIdCache 以 System.identityHashCode 为键：GC 后 hash 可被新对象复用，
+        // 无限增长的旧条目既泄漏内存又可能串判（新对象命中旧 hash 的结果）。
+        // 定期清空 + 清 sig 缓存时连带清，代价只是一次重判定
+        if (sigIdCache.size > 8000) sigIdCache.clear()
         sigIdCache[System.identityHashCode(qp)]?.let { return it }
         val sig = try {
             val ent = Reflect.readAny(qp, "mEntity")
@@ -4354,7 +4397,7 @@ if (hookedAny) Logger.d("hookLiveRerank done pkg=$pkg")
         } catch (_: Throwable) { null }
         if (sig != null) {
             cache[sig]?.let { sigIdCache[System.identityHashCode(qp)] = it; return it }
-            if (cache.size > 3000) cache.clear()
+            if (cache.size > 3000) { cache.clear(); sigIdCache.clear() }
             // miss：主线程先跑 quickOfficialDirty（微秒级官方标记），命中即拦；
             // 未命中入后台线程跑全量判定，先放行
             if (quickOfficialDirty(qp)) {
@@ -4404,7 +4447,8 @@ if (hookedAny) Logger.d("hookLiveRerank done pkg=$pkg")
             } else nonVfDiagCount++
             if (Prefs.bool(Prefs.K_FLT_LIVE, false) && entCls.contains("Live", true)) {
                 liveDiagCount++
-                if (liveDiagCount % 100 == 1) {
+                // 抓栈是高成本操作（填栈+分配），quiet 时不做
+                if (!Logger.quiet && liveDiagCount % 100 == 1) {
                     Logger.d("live stack #${liveDiagCount}:\n" + Thread.currentThread().stackTrace.drop(1).take(16).joinToString("\n"))
                 }
                 if (liveDiagCount <= 3 || liveDiagCount % 100 == 0) Logger.d("live feed hit: cls=$entCls")
@@ -4882,7 +4926,7 @@ if (hookedAny) Logger.d("hookLiveRerank done pkg=$pkg")
     private fun shouldFilterMeta(v: io.github.angbang852.manjiao.data.VideoInfo): Boolean {
         if (Prefs.bool(Prefs.K_FLT_ADS, true) && v.isAd) return true
         if (Prefs.bool(Prefs.K_FLT_LIVE, false) && v.isLive) return true
-        if (Prefs.bool(Prefs.K_FLT_AI, false) && (v.isAi || v.caption.orEmpty().contains("ai生成", true) || v.caption.orEmpty().contains("AI创作") || v.caption.orEmpty().contains("疑似") || v.caption.orEmpty().contains("AIGC") || v.caption.orEmpty().contains("人工智能") || Regex("\\bAI\\b|AI[生成制作绘画]|:AI|AI：").containsMatchIn(v.caption.orEmpty()))) return true
+        if (Prefs.bool(Prefs.K_FLT_AI, false) && (v.isAi || v.caption.orEmpty().contains("ai生成", true) || v.caption.orEmpty().contains("AI创作") || v.caption.orEmpty().contains("疑似") || v.caption.orEmpty().contains("AIGC") || v.caption.orEmpty().contains("人工智能") || AI_META_REGEX.containsMatchIn(v.caption.orEmpty()))) return true
         if (Prefs.bool(Prefs.K_FLT_EC, false) && v.isEcommerce) return true
         val kws = if (Prefs.bool(Prefs.K_FLT_KW_ON, false)) Prefs.str(Prefs.K_FLT_KEYWORDS, "").split(',', '，', ' ').filter { it.isNotBlank() } else emptyList()
         if (kws.isNotEmpty()) {

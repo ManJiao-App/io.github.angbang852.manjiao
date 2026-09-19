@@ -131,6 +131,20 @@ object Prefs {
         if (sp == null) sp = ctx.applicationContext.getSharedPreferences(FILE, Context.MODE_PRIVATE)
     }
 
+    private val pullExecutor = java.util.concurrent.Executors.newSingleThreadExecutor { r ->
+        Thread(r, "ManJiaoPrefs").apply { isDaemon = true }
+    }
+
+    // ★ getter 零阻塞 I/O：此前 bool()/str() 等在调用线程（常为主线程/滑动中）同步读
+    // media 文件（FUSE 路径 5-50ms），限频一过就随机掉帧一次。改为：getter 只读内存，
+    // 文件刷新节流后丢到后台单线程；配置主通道仍是广播（applyRemote 即时生效）
+    private fun schedulePull() {
+        val now = System.currentTimeMillis()
+        if (now - lastPull < PULL_INTERVAL_MS) return
+        lastPull = now
+        pullExecutor.execute { pullRemote(true) }
+    }
+
     private fun pullRemote(force: Boolean) {
         val now = System.currentTimeMillis()
         if (!force && now - lastPull < PULL_INTERVAL_MS) return
@@ -284,19 +298,19 @@ object Prefs {
     }
 
     fun bool(key: String, def: Boolean): Boolean {
-        if (remote) { pullRemote(false); return cache?.get(key) as? Boolean ?: def }
+        if (remote) { schedulePull(); return cache?.get(key) as? Boolean ?: def }
         return sp?.getBoolean(key, def) ?: def
     }
     fun str(key: String, def: String): String {
-        if (remote) { pullRemote(false); return cache?.get(key) as? String ?: def }
+        if (remote) { schedulePull(); return cache?.get(key) as? String ?: def }
         return sp?.getString(key, def) ?: def
     }
     fun int(key: String, def: Int): Int {
-        if (remote) { pullRemote(false); return cache?.get(key) as? Int ?: def }
+        if (remote) { schedulePull(); return cache?.get(key) as? Int ?: def }
         return sp?.getInt(key, def) ?: def
     }
     fun strSet(key: String): Set<String> {
-        if (remote) { pullRemote(false); return cache?.get(key) as? Set<String> ?: emptySet() }
+        if (remote) { schedulePull(); return cache?.get(key) as? Set<String> ?: emptySet() }
         return sp?.getStringSet(key, emptySet()) ?: emptySet()
     }
 

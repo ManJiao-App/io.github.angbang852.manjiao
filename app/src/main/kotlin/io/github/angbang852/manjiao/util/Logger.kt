@@ -13,6 +13,8 @@ object Logger {
     fun init(m: XposedModule) { mod = m }
 
     fun d(msg: String) { if (quiet) return; try { mod?.log(Log.INFO, TAG, msg) } catch (_: Throwable) {}; try { Log.d(TAG, msg) } catch (_: Throwable) {} }
+    // 惰性求值版：quiet 时不进 lambda——带反射/拼接的调用点用它可做到静默期零成本
+    inline fun d(msg: () -> String) { if (quiet) return; d(msg()) }
     // 关键诊断/生命周期日志：不受 quiet 静默影响（频率极低，无性能开销）
     fun always(msg: String) { try { mod?.log(Log.INFO, TAG, msg) } catch (_: Throwable) {}; try { Log.d(TAG, msg) } catch (_: Throwable) {} }
     fun d(t: Throwable) { try { mod?.log(Log.ERROR, TAG, "", t) } catch (_: Throwable) {} }
