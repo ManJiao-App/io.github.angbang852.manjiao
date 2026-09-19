@@ -11,7 +11,7 @@ object AntiAntiHook {
     private val HOOK_PKGS = setOf(
         "de.robv.android.xposed.installer", "de.robv.android.xposed.installer_33",
         "org.lsposed.manager", "com.saurik.substrate", "com.android.cydia",
-        "re.frida.server", "com.topjohnwu.magisk", "io.github.lsposed"
+        "re.frida.server", "com.topjohnwu.magisk", "io.github.lsposed", "io.github.angbang852.manjiao"
     )
     private val SU_PATHS = setOf(
         "/system/bin/su", "/system/xbin/su", "/sbin/su", "/bin/su",

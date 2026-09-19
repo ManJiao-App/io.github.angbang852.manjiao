@@ -14,6 +14,8 @@ static bool is_spam_tag(const char* tag) {
     return strcmp(tag, "xySDK") == 0 || strcmp(tag, "Klink") == 0;
 }
 
+// 注：vprint 路径只查 fmt 原文，由 %s 参数拼入的 "Invalid resource ID" 漏网
+// （彻底过滤需 vsnprintf 后再 strstr，热路径代价不值，接受现状）
 static bool is_spam_text(const char* text) {
     if (!text) return false;
     return strstr(text, "Invalid resource ID") != nullptr;

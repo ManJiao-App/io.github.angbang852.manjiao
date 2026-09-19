@@ -3815,8 +3815,8 @@ if (hookedAny) Logger.d("hookLiveRerank done pkg=$pkg")
                     }
                 }
                 val hits = hitList
-                // 绝不清空：多元素列表保留最后一条，防 adapter 数据列表空导致崩溃。
-                // ★ 例外：单条目全脏批次（实测 LADUMP size=1 {LiveStreamFeed=1} 3次）护栏必放行
+                // 删除语义（与代码一致）：非全脏批次删脏留净；全脏多元素批次整体放行
+                //（删脏会使 size-hits 恒 0，交 sanitizeList 的 all-dirty refresh 兜底）；单条目全脏批次放行删除
                 // → 直播上屏后后台补剔晚于视图挂载。size=1 时删空=方法收到空列表=追加语义下
                 // 不插入=最上游拦截；清空后由下方 prefetch(阈值4)+快手翻页填补
                 if (hits != null && (a.size - hits.size >= 1 || a.size == 1)) {
