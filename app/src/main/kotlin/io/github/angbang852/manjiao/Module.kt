@@ -83,7 +83,7 @@ class Module : XposedModule {
                         return@intercept null
                     }
                     Logger.d("prefs ready")
-                    ctx.registerReceiver(object : BroadcastReceiver() {
+                    val prefsReceiver = object : BroadcastReceiver() {
                         override fun onReceive(c: Context, i: Intent) {
                             try {
                                 if (i.action == Prefs.ACTION_PULL) {
@@ -107,7 +107,15 @@ class Module : XposedModule {
                                 Logger.d("prefs sync $type $key")
                             } catch (t: Throwable) { Logger.d("prefs recv fail: ${t.message}") }
                         }
-                    }, IntentFilter(Prefs.ACTION_UPDATE).apply { addAction(Prefs.ACTION_PULL) }, Prefs.PERM_SYNC, null, Context.RECEIVER_EXPORTED)
+                    }
+                    // ★ API 24/25 无带 flags 的 registerReceiver 重载（API 26+ 才有）：
+                    // 原直接调用会 NoSuchMethodError 被外层 catch，导致全部 hook 静默不装
+                    val prefsFilter = IntentFilter(Prefs.ACTION_UPDATE).apply { addAction(Prefs.ACTION_PULL) }
+                    if (android.os.Build.VERSION.SDK_INT >= 26) {
+                        ctx.registerReceiver(prefsReceiver, prefsFilter, Prefs.PERM_SYNC, null, Context.RECEIVER_EXPORTED)
+                    } else {
+                        ctx.registerReceiver(prefsReceiver, prefsFilter)
+                    }
                     Logger.d("prefs receiver registered")
                     Logger.safe("anti") { AntiAntiHook.hook(this, cl) }
                     Logger.safe("dl") { VideoDownloaderHook.hook(this, cl) }

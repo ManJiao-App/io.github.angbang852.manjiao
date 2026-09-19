@@ -258,23 +258,27 @@ object Prefs {
     }
 
     private fun writeMediaSnapshot() {
-        try {
-            val s = sp ?: return
-            ensureMediaDir()
-            val props = Properties()
-            for ((k, v) in s.all) {
-                when (v) {
-                    is Boolean -> props[k] = v.toString()
-                    is Int -> props[k] = "int:$v"
-                    is Set<*> -> props[k] = "set:" + (v as Set<String>).joinToString(",")
-                    else -> props[k] = v.toString()
+        // ★ 后台化（local 模式）：每次拨开关全量重写文件是 UI 线程 IO；sp 已 apply，
+        // 落盘只为跨进程同步兜底。与 pullRemote 共用单线程 executor 天然串行
+        pullExecutor.execute {
+            try {
+                val s = sp ?: return@execute
+                ensureMediaDir()
+                val props = Properties()
+                for ((k, v) in s.all) {
+                    when (v) {
+                        is Boolean -> props[k] = v.toString()
+                        is Int -> props[k] = "int:$v"
+                        is Set<*> -> props[k] = "set:" + (v as Set<String>).joinToString(",")
+                        else -> props[k] = v.toString()
+                    }
                 }
-            }
-            val f = File(MEDIA_FILE)
-            f.delete()
-            f.outputStream().use { props.store(it, null) }
-            relaxMediaFilePerm(f)
-        } catch (t: Throwable) { Logger.d("prefs media write fail: $t") }
+                val f = File(MEDIA_FILE)
+                f.delete()
+                f.outputStream().use { props.store(it, null) }
+                relaxMediaFilePerm(f)
+            } catch (t: Throwable) { Logger.d("prefs media write fail: $t") }
+        }
     }
 
     fun reload() {
@@ -283,21 +287,26 @@ object Prefs {
     }
 
     private fun remoteWriteMedia(type: String, key: String, value: Any?) {
-        try {
-            ensureMediaDir()
-            val f = File(MEDIA_FILE)
-            val props = Properties()
-            if (f.exists()) f.inputStream().use { props.load(it) }
-            when (type) {
-                "bool" -> props[key] = value.toString()
-                "int" -> props[key] = "int:$value"
-                "str" -> props[key] = value.toString()
-                "strset" -> props[key] = "set:" + (value as? Set<*> ?: emptySet<String>()).joinToString(",")
-            }
-            f.outputStream().use { props.store(it, null) }
-            relaxMediaFilePerm(f)
-            lastPull = System.currentTimeMillis()
-        } catch (t: Throwable) { Logger.d("prefs remote media write fail: $t") }
+        // ★ 后台化：media 文件读+全量重写此前在调用线程（常为主线程/菜单 UI），
+        // FUSE 路径 5-50ms。cache 已先行更新，UI 不依赖写盘返回；lastPull 同步
+        // 前移防排队写盘被后续 pull 抢跑（与 pullRemote 同一 executor 串行）
+        lastPull = System.currentTimeMillis()
+        pullExecutor.execute {
+            try {
+                ensureMediaDir()
+                val f = File(MEDIA_FILE)
+                val props = Properties()
+                if (f.exists()) f.inputStream().use { props.load(it) }
+                when (type) {
+                    "bool" -> props[key] = value.toString()
+                    "int" -> props[key] = "int:$value"
+                    "str" -> props[key] = value.toString()
+                    "strset" -> props[key] = "set:" + (value as? Set<*> ?: emptySet<String>()).joinToString(",")
+                }
+                f.outputStream().use { props.store(it, null) }
+                relaxMediaFilePerm(f)
+            } catch (t: Throwable) { Logger.d("prefs remote media write fail: $t") }
+        }
     }
 
     fun bool(key: String, def: Boolean): Boolean {

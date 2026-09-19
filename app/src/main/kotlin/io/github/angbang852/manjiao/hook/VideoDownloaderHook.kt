@@ -117,8 +117,11 @@ object VideoDownloaderHook {
             val c = URL::class.java.getConstructor(String::class.java)
             xp.hook(c).setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE).setId("url.ctor").intercept { chain ->
                 val url = chain.args[0] as? String ?: ""
-                if (url.length > 8 && KsClass.VIDEO_HOST_HINTS.any { url.contains(it) }) {
-                    tryCapture(url, "URL")
+                // ★ 廉价预筛：所有 VIDEO_HOST_HINTS 均含 kwai/yximgs 其一，
+                // 两次子串扫描代替 11 次（URL 构造是全进程热路径）
+                if (url.length > 8) {
+                    val low = url.lowercase()
+                    if (low.contains("kwai") || low.contains("yximgs")) tryCapture(url, "URL")
                 }
                 chain.proceed()
                 null
@@ -187,6 +190,11 @@ object VideoDownloaderHook {
         }
     }
 
+    // ★ 新视频判定：photo 对象身份变化即换视频——重建 VideoInfo，清掉 repUrls/
+    // url 等跨视频残留（否则 bestRepUrl 可能在上一条视频的历史里挑旧 URL，
+    // 下载内容错配）
+    private var lastPhotoRef: java.lang.ref.WeakReference<Any>? = null
+
     private fun extractMeta(act: Activity) {
         Logger.safe("extractMeta") {
             var photo = findPhoto(act)
@@ -197,6 +205,10 @@ object VideoDownloaderHook {
                     Logger.d("QPhoto mEntity: ${ent.javaClass.name}")
                     photo = ent
                 }
+            }
+            if (lastPhotoRef?.get() !== photo) {
+                lastPhotoRef = java.lang.ref.WeakReference(photo)
+                CurrentVideo.reset()
             }
             val imgIs = isImage(photo)
             val imgs = if (imgIs) extractImageUrls(photo) else emptyList()
@@ -363,12 +375,17 @@ object VideoDownloaderHook {
     }
 
     private fun hookOkHttp(xp: XposedInterface, cl: ClassLoader) {
-        val req = Reflect.findClass("okhttp3.Request", cl) ?: return
         val client = Reflect.findClass("okhttp3.OkHttpClient", cl) ?: return
         Logger.safe("okhttp") {
             val m = Reflect.findMethod(client, "newCall", 1) ?: return@safe
             xp.hook(m).setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE).setId("okhttp.newCall").intercept { chain ->
-                tryCapture(Reflect.callMethod(chain.args[0], "url")?.toString() ?: "", "okhttp"); chain.proceed()
+                val u = Reflect.callMethod(chain.args[0], "url")?.toString() ?: ""
+                // ★ 廉价预筛：newCall 是全进程最高频路径之一，同 url.ctor
+                if (u.length > 8) {
+                    val low = u.lowercase()
+                    if (low.contains("kwai") || low.contains("yximgs")) tryCapture(u, "okhttp")
+                }
+                chain.proceed()
             }
         }
     }

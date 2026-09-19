@@ -340,6 +340,11 @@ object ContentFilterHook {
     // d.t / e$d.E 内部方法），但数据一定以 List / 单项实体的形式跨方法。
     // 策略：按「回调签名」hook onPageScrolled，并扫描 rerank 包的 List 返回方法过滤。
     private val hookedRerankCls = java.util.Collections.newSetFromMap(java.util.concurrent.ConcurrentHashMap<String, Boolean>())
+
+    // ★ 去重键含 classloader 身份：快手插件化会把同名类装进第二个 loader，
+    // 按类名去重会让新 Class 被误判「已 hook」而静默漏装（fragSeqHookedClasses
+    // :1592 早已用此写法，此处统一）
+    private fun hookKey(c: Class<*>): String = c.name + "@" + System.identityHashCode(c.classLoader)
     private fun hookLiveRerank(xp: XposedInterface, cl: ClassLoader) {
         val pkg = "com.kuaishou.live.rerank"
         val tryNames = listOf("e", "e\$b", "d", "e\$d", "c", "b")
@@ -605,7 +610,7 @@ if (hookedAny) Logger.d("hookLiveRerank done pkg=$pkg")
         )
         for (cn in names) {
             val cc = Reflect.findClass(cn, cl) ?: continue
-            val already = synchronized(hookedPageLists) { !hookedPageLists.add(cn) }
+            val already = synchronized(hookedPageLists) { !hookedPageLists.add(hookKey(cc)) }
             if (already) continue
             Logger.d("hookPageList: $cn")
             var c: Class<*>? = cc
@@ -880,7 +885,7 @@ if (hookedAny) Logger.d("hookLiveRerank done pkg=$pkg")
     }
 
     private fun hookMilanoContainer(xp: XposedInterface, cc: Class<*>, cn: String) {
-        synchronized(hookedMilanoContainers) { if (!hookedMilanoContainers.add(cn)) return }
+        synchronized(hookedMilanoContainers) { if (!hookedMilanoContainers.add(hookKey(cc))) return }
         Logger.d("hookMilano: $cn")
         var c: Class<*>? = cc
         var lvl = 0
@@ -951,7 +956,7 @@ if (hookedAny) Logger.d("hookLiveRerank done pkg=$pkg")
     private fun ensureLiveFeedConstructHooked(ent: Any) {
         val xp = xpRef ?: return
         val c = ent.javaClass
-        if (!liveCtorHookedCls.add(c.name)) return
+        if (!liveCtorHookedCls.add(hookKey(c))) return
         Logger.d("hookLiveCtor late: ${c.name} ctors=${c.declaredConstructors.size}")
         for (ctor in c.declaredConstructors) {
             Logger.safe("hookLiveCtorLate.${ctor.parameterTypes.size}") {
@@ -1127,7 +1132,12 @@ if (hookedAny) Logger.d("hookLiveRerank done pkg=$pkg")
                                 val dirty = col.filter { laElDirty(it) }
                                 if (dirty.isNotEmpty()) {
                                     val before = col.size
-                                    try { col.removeAll(dirty.toSet()) } catch (_: Throwable) {}
+                                    // ★ 身份删除：equals 语义会误删「同值不同实例」的干净兄弟项
+                                    try {
+                                        val dirtyId = java.util.Collections.newSetFromMap(java.util.IdentityHashMap<Any, Boolean>())
+                                        dirtyId.addAll(dirty)
+                                        col.removeIf { dirtyId.contains(it) }
+                                    } catch (_: Throwable) {}
                                     Logger.always("LADEL $mn removed=${dirty.size}/$before left=${col.size}")
                                     laStack(mn)
                                 }
@@ -1239,7 +1249,12 @@ if (hookedAny) Logger.d("hookLiveRerank done pkg=$pkg")
                                 val dirty = col.filter { laElDirty(it) }
                                 if (dirty.isNotEmpty()) {
                                     val before = col.size
-                                    try { col.removeAll(dirty.toSet()) } catch (_: Throwable) {}
+                                    // ★ 身份删除（同 LAWATCH）
+                                    try {
+                                        val dirtyId = java.util.Collections.newSetFromMap(java.util.IdentityHashMap<Any, Boolean>())
+                                        dirtyId.addAll(dirty)
+                                        col.removeIf { dirtyId.contains(it) }
+                                    } catch (_: Throwable) {}
                                     Logger.always("TRUEDEL $mn removed=${dirty.size}/$before left=${col.size}")
                                     trueStack(mn)
                                 }
@@ -2536,7 +2551,7 @@ if (hookedAny) Logger.d("hookLiveRerank done pkg=$pkg")
             var lvl = 0
             while (cc != null && cc != Any::class.java && lvl < 6) {
                 val clsNow = cc
-                if (!hookedPagerCls.add(clsNow.name)) { cc = cc.superclass; lvl++; continue }
+                if (!hookedPagerCls.add(hookKey(clsNow))) { cc = cc.superclass; lvl++; continue }
                 for (m in clsNow.declaredMethods) {
                     val nm = m.name
                     if (!m.returnType.isPrimitive && m.returnType != Void.TYPE &&
@@ -2707,7 +2722,7 @@ if (hookedAny) Logger.d("hookLiveRerank done pkg=$pkg")
     private val adpXDumped = java.util.Collections.newSetFromMap(java.util.concurrent.ConcurrentHashMap<String, Boolean>())
     private fun hookPagerAdapter(c: Class<*>) {
         val xp = xpRef ?: run { Logger.always("hookPagerAdapter skip: xpRef null"); return }
-        val added = synchronized(hookedAdpClasses) { hookedAdpClasses.add(c.name) }
+        val added = synchronized(hookedAdpClasses) { hookedAdpClasses.add(hookKey(c)) }
         if (!added) { Logger.d("hookPagerAdapter dup: ${c.name}"); return }
         Logger.d("hookPagerAdapter: ${c.name}")
         // 诊断：dump 类层次全部方法，找数据供给方法
@@ -3274,7 +3289,7 @@ if (hookedAny) Logger.d("hookLiveRerank done pkg=$pkg")
     private fun hookDataSource(c: Class<*>) {
         val xp = xpRef ?: return
         synchronized(hookedDsClasses) {
-            if (!hookedDsClasses.add(c.name)) return
+            if (!hookedDsClasses.add(hookKey(c))) return
         }
         Logger.d("hookDataSource: ${c.name}")
         val qpClass = try { Class.forName("com.yxcorp.gifshow.entity.QPhoto", false, c.classLoader) } catch (_: Throwable) { null }
@@ -3349,7 +3364,7 @@ if (hookedAny) Logger.d("hookLiveRerank done pkg=$pkg")
     private fun hookViewModel(vm: Any) {
         val xp = xpRef ?: return
         val c = vm.javaClass
-        synchronized(hookedVmClasses) { if (!hookedVmClasses.add(c.name)) return }
+        synchronized(hookedVmClasses) { if (!hookedVmClasses.add(hookKey(c))) return }
         val qpClass = try { Class.forName("com.yxcorp.gifshow.entity.QPhoto", false, c.classLoader) } catch (_: Throwable) { null } ?: return
         Logger.d("hookViewModel: ${c.name}")
         qpClassRef = qpClass
@@ -3804,8 +3819,11 @@ if (hookedAny) Logger.d("hookLiveRerank done pkg=$pkg")
                     // ★ 直接删除脏项不补位：补位池耗尽后轮转退化会反复取同一条旧视频=重复刷到。
                     // 列表短暂缩水由 prefetch(阈值4)+快手自身翻页填补，无重复
                     var deleted = 0
+                    val la = a as MutableList<Any?>
                     for (h in hits) {
-                        (a as MutableList<Any?>).remove(h); deleted++
+                        // ★ 按身份删：equals 语义会误删「同值不同实例」的干净兄弟项
+                        val i = la.indexOfFirst { it === h }
+                        if (i >= 0) { la.removeAt(i); deleted++ }
                     }
                     removed += deleted
                     Logger.d("feed filtered del=$deleted left=${a.size} first: ${cap0?.take(30)}")

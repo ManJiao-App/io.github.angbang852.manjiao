@@ -25,10 +25,13 @@ data class VideoInfo(
     fun valid() = !url.isNullOrEmpty() || imageUrls.isNotEmpty()
 
     fun bestRepUrl(): String? {
-        val pid = url?.let { Regex("\\d{15,}").find(it)?.value }
+        // ★ pid 提不出（url 为空或无 15 位数字的直链/IP 直链）时不放行任何候选：
+        // 否则会在 repUrls 历史里跨视频挑清晰度最高的一条（内容错配）；
+        // 此场景由 downloadVideo 的候选回退（info.url/domainUrl）兜底
+        val pid = url?.let { Regex("\\d{15,}").find(it)?.value } ?: return null
         return repUrls
             .filter { it.url.contains(".mp4") || it.url.contains(".flv") }
-            .filter { pid == null || it.url.contains(pid) }
+            .filter { it.url.contains(pid) }
             .maxByOrNull { it.height * 10000 + it.bitrate }
             ?.url
     }

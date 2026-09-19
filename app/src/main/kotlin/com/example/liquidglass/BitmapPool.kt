@@ -27,7 +27,8 @@ class BitmapPool private constructor() {
     
     companion object {
         private const val TAG = "BitmapPool"
-        private const val MAX_POOL_SIZE = 20  // 最大池大小
+        private const val MAX_POOL_SIZE = 20  // 最大池大小（张数）
+        private const val MAX_POOL_BYTES = 48L * 1024 * 1024  // ★ 字节上限：宿主进程内要克制（≈4-5 张全屏 ARGB_8888）
         private const val ENABLE_LOG = false  // 日志开关
         
         @Volatile
@@ -44,6 +45,7 @@ class BitmapPool private constructor() {
     // Key: "width_height_config", Value: MutableList<Bitmap>
     private val pool = ConcurrentHashMap<String, MutableList<Bitmap>>()
     private var totalSize = 0
+    private var totalBytes = 0L
     
     /**
      * 从池中获取 Bitmap
@@ -61,6 +63,7 @@ class BitmapPool private constructor() {
             if (!list.isNullOrEmpty()) {
                 val bitmap = list.removeAt(list.size - 1)
                 totalSize--
+                totalBytes -= bitmap.byteCount
                 
                 if (ENABLE_LOG) {
                     Log.d(TAG, "♻️ 复用 Bitmap: ${width}x${height}, 池大小: $totalSize")
@@ -92,20 +95,22 @@ class BitmapPool private constructor() {
         }
         
         synchronized(pool) {
-            // 检查池大小限制
-            if (totalSize >= MAX_POOL_SIZE) {
+            val bmpBytes = bitmap.byteCount
+            // ★ 字节上限：只按张数限会在大图上失控（20 张全屏 ARGB_8888 ≈ 200MB）
+            if (totalSize >= MAX_POOL_SIZE || totalBytes + bmpBytes > MAX_POOL_BYTES) {
                 if (ENABLE_LOG) {
                     Log.d(TAG, "⚠️ 池已满，回收 Bitmap: ${bitmap.width}x${bitmap.height}")
                 }
                 bitmap.recycle()
                 return false
             }
-            
+
             val key = makeKey(bitmap.width, bitmap.height, bitmap.config ?: Bitmap.Config.ARGB_8888)
             val list = pool.getOrPut(key) { mutableListOf() }
-            
+
             list.add(bitmap)
             totalSize++
+            totalBytes += bmpBytes
             
             if (ENABLE_LOG) {
                 Log.d(TAG, "✅ 归还 Bitmap: ${bitmap.width}x${bitmap.height}, 池大小: $totalSize")
@@ -126,6 +131,7 @@ class BitmapPool private constructor() {
             }
             pool.clear()
             totalSize = 0
+            totalBytes = 0L
             
             if (ENABLE_LOG) {
                 Log.d(TAG, "🗑️ 清空对象池")

@@ -71,7 +71,7 @@ object MainMenuDialog {
 
     fun show(ctx: Context) {
         Logger.d("MainMenuDialog.show called")
-        Prefs.reload()
+        Prefs.reload()  // 仅主菜单入口刷新：子页共用内存缓存（广播即时同步），子页 reload 是纯冗余的主线程同步 IO
         val items = listOf(
             Item("", "刷新内容", hasSub = false) { ContentFilterHook.refreshContent() },
             Item("", "下载") { showDownload(ctx) },
@@ -108,7 +108,6 @@ object MainMenuDialog {
     }
 
     private fun showGesture(ctx: Context) {
-        Prefs.reload()
         val container = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
         container.addView(itemSwitchRow(ctx, "", "禁止双击点赞", Prefs.bool(Prefs.K_GS_NO_DBL_LIKE, false)) { nv ->
             Prefs.setBoolSync(ctx, Prefs.K_GS_NO_DBL_LIKE, nv)
@@ -136,7 +135,6 @@ object MainMenuDialog {
     }
 
     private fun showGestureTaps(ctx: Context, key: String, title: String) {
-        Prefs.reload()
         val cur = Prefs.int(key, 2)
         val container = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
         for (taps in 0..1) {
@@ -151,7 +149,6 @@ object MainMenuDialog {
     }
 
     private fun showPlayback(ctx: Context) {
-        Prefs.reload()
         val container = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
         container.addView(itemSwitchRow(ctx, "", "停止循环播放", Prefs.bool(Prefs.K_PB_NO_LOOP, false)) { nv ->
             Prefs.setBoolSync(ctx, Prefs.K_PB_NO_LOOP, nv)
@@ -166,7 +163,6 @@ object MainMenuDialog {
     }
 
     private fun showImmersive(ctx: Context) {
-        Prefs.reload()
         val sw = itemSwitchRow(ctx, "", "一键沉浸", Prefs.bool(Prefs.K_IMM_ON, false)) { nv ->
             Prefs.setBoolSync(ctx, Prefs.K_IMM_ON, nv)
             toast(ctx, if (nv) "一键沉浸已开启" else "一键沉浸已关闭")
@@ -176,7 +172,6 @@ object MainMenuDialog {
 
 
     private fun showHideCustom(ctx: Context) {
-        Prefs.reload()
         val container = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
         container.addView(itemSwitchRow(ctx, "", "顶栏", Prefs.bool(Prefs.K_IMM_TOPBAR_ON, false), hasSub = true, subAction = { showTopBarItems(ctx) }) { nv ->
             Prefs.setBoolSync(ctx, Prefs.K_IMM_TOPBAR_ON, nv)
@@ -208,7 +203,6 @@ object MainMenuDialog {
     private val RIGHT_ITEMS = arrayOf("关注", "喜欢", "评论", "收藏", "转发", "音乐封面")
 
     private fun showTopBarItems(ctx: Context) {
-        Prefs.reload()
         val selected = Prefs.strSet(Prefs.K_IMM_TOPBAR).toMutableSet()
         val container = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
         for (s in TOPBAR_ITEMS) {
@@ -222,7 +216,6 @@ object MainMenuDialog {
     }
 
     private fun showRightBtnItems(ctx: Context) {
-        Prefs.reload()
         val selected = Prefs.strSet(Prefs.K_IMM_RIGHT_ITEMS).toMutableSet()
         val container = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
         for (s in RIGHT_ITEMS) {
@@ -236,7 +229,6 @@ object MainMenuDialog {
     }
 
     private fun showFilter(ctx: Context) {
-        Prefs.reload()
         val rows = arrayOf(
             arrayOf("过滤广告内容", Prefs.K_FLT_ADS, true, false),
             arrayOf("过滤广告视频", Prefs.K_FLT_ADVIDEO, true, false),
@@ -303,7 +295,6 @@ object MainMenuDialog {
     }
 
     private fun showPerf(ctx: Context) {
-        Prefs.reload()
         val container = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(ctx, 20), dp(ctx, 8), dp(ctx, 20), dp(ctx, 8))
@@ -329,7 +320,6 @@ object MainMenuDialog {
     }
 
     private fun showPurify(ctx: Context) {
-        Prefs.reload()
         val container = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(ctx, 20), dp(ctx, 8), dp(ctx, 20), dp(ctx, 8))
@@ -391,12 +381,22 @@ object MainMenuDialog {
 
     private fun attachOverlay(ctx: Context, glass: GlassPanel) {
         val activity = unwrapActivity(ctx) ?: run { Logger.d("attach: no activity"); return }
+        if (activity.isDestroyed || activity.isFinishing) { Logger.d("attach: activity gone"); return }
         detachOverlay()
         // crossBlur 跨窗实时模糊（既定方案）：window 缩到面板大小 + FLAG_BLUR_BEHIND +
         // blurBehindRadius（SF 实时模糊 SurfaceView 视频，零采样天然同步）。
         // 需手机端 KernelSU root shell 执行 settings put global pms_settings_blur_enabled 1
         // 启用 crossBlur（One UI 默认禁用）；未启用时 fallback dimAmount 暗化。
         val dlg = android.app.Dialog(activity)
+        // ★ 泄漏接线：菜单开着时宿主 Activity 被销毁（旋转/深色切换/回收），
+        // Dialog 属独立 window 不会自动 dismiss——Activity decor 一 detach 就拆
+        // 菜单，静态 currentDialog 不再钉住已销毁的 Activity 整棵视图树
+        try {
+            activity.window?.decorView?.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+                override fun onViewAttachedToWindow(v: View) {}
+                override fun onViewDetachedFromWindow(v: View) { detachOverlay() }
+            })
+        } catch (_: Throwable) {}
         dlg.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE)
         dlg.setCanceledOnTouchOutside(true)
         dlg.setCancelable(true)
@@ -443,6 +443,10 @@ object MainMenuDialog {
     }
 
     private fun detachOverlay() {
+        // ★ 统一 flush：过滤输入只在失焦时保存，而 ✕/返回键/点外部关闭都不抢
+        // 焦点（✕ 未设 focusableInTouchMode）——拆窗前强制 clearFocus 触发保存
+        // 回调，避免「输完直接关」静默丢输入
+        try { currentDialog?.currentFocus?.clearFocus() } catch (_: Throwable) {}
         currentDialog?.let { d ->
             try { d.dismiss() } catch (_: Throwable) {}
         }
