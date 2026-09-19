@@ -18,7 +18,10 @@ object GestureHook {
     // 判成长按弹出分享菜单。故双击必须在 DOWN 时消费(快手收不到第二击任何事件)。
     // 滑动误判由"干净 tap 才计数"治本(见 ACTION_UP)：滑动 UP 位移大不入计数。
     private const val TAP_TIMEOUT = 500L
-    private const val TAP_SLOP = 200f
+    // ★ slop 回归系统标准：ViewConfiguration.scaledDoubleTapSlop（通常 50-100px）。
+    // 原 200px 硬编码会把「快速连点相邻按钮」的第二次 DOWN 也判成双击吞掉，
+    // 破坏点赞→评论等连击操作。初始值取旧值兜底，每次 DOWN 都会被系统标准覆盖
+    @Volatile private var slopPx = 200f
     // 0=IDLE, 1=已干净单击, 2=已双击(未拦截,等待三击)
     @Volatile private var tapState = 0
     private var lastTapTime = 0L
@@ -48,18 +51,19 @@ object GestureHook {
                     when (ev.action) {
                         MotionEvent.ACTION_DOWN -> {
                             downX = ev.x; downY = ev.y
+                            try { slopPx = android.view.ViewConfiguration.get(act).scaledDoubleTapSlop.toFloat() } catch (_: Throwable) {}
                             if (handleDown(act, ev)) { consumeUp = true; return@intercept true }
                         }
                         MotionEvent.ACTION_MOVE -> {
                             // 位移中途超 slop 即判滑动，提前失效（双击计数作废）
-                            if (Math.abs(ev.x - downX) >= TAP_SLOP || Math.abs(ev.y - downY) >= TAP_SLOP) tapState = 0
+                            if (Math.abs(ev.x - downX) >= slopPx || Math.abs(ev.y - downY) >= slopPx) tapState = 0
                             if (consumeUp) return@intercept true
                         }
                         MotionEvent.ACTION_UP -> {
                             if (consumeUp) { consumeUp = false; return@intercept true }
                             // ★ 干净 tap 才入计数：DOWN→UP 位移超 slop = 滑动手势，
                             // 重置计数（快速连滑无论多密都不会误判双击）
-                            val moved = Math.abs(ev.x - downX) >= TAP_SLOP || Math.abs(ev.y - downY) >= TAP_SLOP
+                            val moved = Math.abs(ev.x - downX) >= slopPx || Math.abs(ev.y - downY) >= slopPx
                             if (moved) tapState = 0
                             else {
                                 val gap = SystemClock.uptimeMillis() - lastTapTime
@@ -91,7 +95,7 @@ object GestureHook {
         val now = SystemClock.uptimeMillis()
         val dx = Math.abs(ev.x - lastTapX)
         val dy = Math.abs(ev.y - lastTapY)
-        val inWindow = now - lastTapTime < TAP_TIMEOUT && dx < TAP_SLOP && dy < TAP_SLOP
+        val inWindow = now - lastTapTime < TAP_TIMEOUT && dx < slopPx && dy < slopPx
 
         if (!inWindow) return false
 

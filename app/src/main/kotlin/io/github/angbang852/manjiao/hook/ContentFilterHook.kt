@@ -3718,6 +3718,7 @@ if (hookedAny) Logger.d("hookLiveRerank done pkg=$pkg")
                             @Suppress("UNCHECKED_CAST")
                             val mutable = v as MutableList<Any?>
                             var swapped = 0
+                            val cleanRun = Runnable {
                             var idx = 0
                             while (idx < mutable.size) {
                                 val el = mutable[idx]
@@ -3761,6 +3762,10 @@ if (hookedAny) Logger.d("hookLiveRerank done pkg=$pkg")
                                 else idx++
                             }
                             if (swapped > 0) Logger.always("vmListClean ${f.name}: swapped/removed $swapped (left ${mutable.size})")
+                            }
+                            // ★ 后台闸门：非线程安全列表（ArrayList 等）投回主线程改
+                            if (isBgMutationSafe(mutable) || Looper.myLooper() == Looper.getMainLooper()) cleanRun.run()
+                            else handler.post { try { cleanRun.run() } catch (_: Throwable) {} }
 
                         }
                     } catch (_: Throwable) {}
@@ -3820,10 +3825,18 @@ if (hookedAny) Logger.d("hookLiveRerank done pkg=$pkg")
                     // 列表短暂缩水由 prefetch(阈值4)+快手自身翻页填补，无重复
                     var deleted = 0
                     val la = a as MutableList<Any?>
-                    for (h in hits) {
-                        // ★ 按身份删：equals 语义会误删「同值不同实例」的干净兄弟项
-                        val i = la.indexOfFirst { it === h }
-                        if (i >= 0) { la.removeAt(i); deleted++ }
+                    // ★ 后台闸门：非线程安全列表的删除投回主线程按身份执行
+                    if (!isBgMutationSafe(la) && Looper.myLooper() != Looper.getMainLooper()) {
+                        val dirtyId = java.util.Collections.newSetFromMap(java.util.IdentityHashMap<Any, Boolean>())
+                        hits.forEach { dirtyId.add(it) }
+                        removeByIdentityOnMain(la, dirtyId, "fla", false)
+                        deleted = hits.size
+                    } else {
+                        for (h in hits) {
+                            // ★ 按身份删：equals 语义会误删「同值不同实例」的干净兄弟项
+                            val i = la.indexOfFirst { it === h }
+                            if (i >= 0) { la.removeAt(i); deleted++ }
+                        }
                     }
                     removed += deleted
                     Logger.d("feed filtered del=$deleted left=${a.size} first: ${cap0?.take(30)}")
@@ -3942,6 +3955,37 @@ if (hookedAny) Logger.d("hookLiveRerank done pkg=$pkg")
             c = c.superclass; lvl++
         }
     }
+    // ★ 后台清洗线程闸门：非线程安全列表（ArrayList 等）的结构性修改
+    // （removeAt/removeIf）与主线程迭代并发时，会让宿主自己的迭代代码抛
+    // CME/IndexOOB——PROTECTIVE 只护模块回调，救不了宿主。COW/Synchronized
+    // 列表可后台直改；其余一律把删除动作投回主线程（同线程修改无并发）。
+    // dirtyId 用 IdentityHashMap 身份比对
+    private fun isBgMutationSafe(list: Any): Boolean {
+        val cn = list.javaClass.name
+        return cn.contains("CopyOnWriteArrayList") || cn.contains("Synchronized")
+    }
+
+    private fun removeByIdentityOnMain(list: MutableList<Any?>, dirtyId: MutableSet<Any>, tag: String, allowEmpty: Boolean) {
+        handler.post {
+            try {
+                var removed = 0
+                for (i in list.indices.reversed()) {
+                    val el = list[i]
+                    if (el != null && dirtyId.contains(el) && (allowEmpty || list.size > 1)) {
+                        list.removeAt(i); removed++
+                    }
+                }
+                if (removed > 0) Logger.d("sanitize-main $tag removed $removed (left ${list.size})")
+            } catch (_: Throwable) {}
+        }
+    }
+
+    // 宽匹配（Live/Ad 子串）前的结构类名黑名单：Presenter/Callback/Fragment/
+    // Interceptor/Executor 等管理结构绝不能被子串误杀（FragmentManager.mAdded 教训）
+    private fun isStructClsName(cn: String): Boolean =
+        cn.contains("Presenter") || cn.contains("Callback") || cn.contains("Fragment") ||
+            cn.contains("Interceptor") || cn.contains("Executer") || cn.contains("Executor")
+
     private fun sanitizeList(list: MutableList<Any?>, tag: String, allowEmpty: Boolean = false) {
         val dirtyIdx = arrayListOf<Int>()
         val originalSize = list.size
@@ -3950,16 +3994,24 @@ if (hookedAny) Logger.d("hookLiveRerank done pkg=$pkg")
             val it = list[i] ?: continue
             val dirty = try {
                 val q = findQpInObject(it) ?: it
-                // 兼容裸实体（LiveStreamFeed/广告实体无 mEntity 包装）：按类名兜底（受对应开关控制）
+                // 兼容裸实体（LiveStreamFeed/广告实体无 mEntity 包装）：按类名兜底（受对应开关控制）；
+                // ★ 宽匹配"Live"前先过结构类名黑名单（LiveConfig/LiveXxxPresenter 误删教训）
                 val rawCls = it.javaClass.name
                 shouldFilterFeed(q) ||
                     (Prefs.bool(Prefs.K_FLT_LIVE, false) && rawCls.contains("LiveStreamFeed")) ||
                     (Prefs.bool(Prefs.K_FLT_ADS, false) && rawCls.contains("AdFeed")) ||
-                    (Prefs.bool(Prefs.K_FLT_LIVE, false) && rawCls.contains("Live", true))
+                    (Prefs.bool(Prefs.K_FLT_LIVE, false) && !isStructClsName(rawCls) && rawCls.contains("Live", true))
             } catch (_: Throwable) { false }
             if (dirty) dirtyIdx.add(i)
         }
         if (dirtyIdx.isEmpty()) return
+        // ★ 后台闸门：非线程安全列表的删除投回主线程按身份执行
+        if (!isBgMutationSafe(list) && Looper.myLooper() != Looper.getMainLooper()) {
+            val dirtyId = java.util.Collections.newSetFromMap(java.util.IdentityHashMap<Any, Boolean>())
+            for (i in dirtyIdx) list.getOrNull(i)?.let { dirtyId.add(it) }
+            removeByIdentityOnMain(list, dirtyId, tag, allowEmpty)
+            return
+        }
         var removed = 0
         for (i in dirtyIdx.sortedDescending()) {
             // 直播位置替换成 VideoFeed 会触发 onMeasure ClassCastException，优先直接删除。
@@ -4280,7 +4332,7 @@ if (hookedAny) Logger.d("hookLiveRerank done pkg=$pkg")
         // ★ 直播：ent 类名含 Live 即拦（纯类名检查微秒级，与 advideo:mAd 同级）。
         // 实证 02:36 LADUMP {LiveStreamFeed=3} 批次 del 只带走 AI/广告、3 条直播全部放行
         // ——直播此前不在 quick 路径，后台补剔又晚于 pager 构造，致精选tab直播上屏
-        if (Prefs.bool(Prefs.K_FLT_LIVE, false) && ent.javaClass.name.contains("Live", true)) {
+        if (Prefs.bool(Prefs.K_FLT_LIVE, false) && !isStructClsName(ent.javaClass.name) && ent.javaClass.name.contains("Live", true)) {
             hit("live:entCls", qp); return true
         }
         if (Prefs.bool(Prefs.K_FLT_ADVIDEO, true)) {
@@ -4372,7 +4424,7 @@ if (hookedAny) Logger.d("hookLiveRerank done pkg=$pkg")
                 nonVfDiagCount++
                 Logger.d("nonVF ent: $entCls")
             } else nonVfDiagCount++
-            if (Prefs.bool(Prefs.K_FLT_LIVE, false) && entCls.contains("Live", true)) {
+            if (Prefs.bool(Prefs.K_FLT_LIVE, false) && !isStructClsName(entCls) && entCls.contains("Live", true)) {
                 liveDiagCount++
                 // 抓栈是高成本操作（填栈+分配），quiet 时不做
                 if (!Logger.quiet && liveDiagCount % 100 == 1) {
@@ -4600,7 +4652,7 @@ if (hookedAny) Logger.d("hookLiveRerank done pkg=$pkg")
             if (cap.contains("签到") && (cap.contains("活跃") || cap.contains("宝箱") || cap.contains("双倍") || cap.contains("极速") || cap.contains("升级") || cap.contains("开宝箱"))) { hit("ads:capTask", qp); return true }
         }
         if (Prefs.bool(Prefs.K_FLT_LIVE, false)) {
-            if (ent.javaClass.name.contains("Live", true)) { hit("live:entCls", qp); return true }
+            if (!isStructClsName(ent.javaClass.name) && ent.javaClass.name.contains("Live", true)) { hit("live:entCls", qp); return true }
             val lm = Reflect.readAny(ent, "mLivePlaybackMeta")
             if (lm != null && Reflect.readAny(lm, "mLiveStreamId") != null) { hit("live:meta", qp); return true }
             if (pm != null && Reflect.readBool(pm, "mCurrentLivingState") == true) { hit("live:state", qp); return true }
@@ -4685,7 +4737,7 @@ if (hookedAny) Logger.d("hookLiveRerank done pkg=$pkg")
         val ent = Reflect.readAny(qp, "mEntity") ?: qp
         val entCls = ent.javaClass.name
         if (!entCls.contains("feed.VideoFeed")) {
-            if (Prefs.bool(Prefs.K_FLT_LIVE, false) && entCls.contains("Live", true)) return true
+            if (Prefs.bool(Prefs.K_FLT_LIVE, false) && !isStructClsName(entCls) && entCls.contains("Live", true)) return true
             return false
         }
         val cm = Reflect.readAny(ent, "mCommonMeta")
@@ -4710,7 +4762,7 @@ if (hookedAny) Logger.d("hookLiveRerank done pkg=$pkg")
             if (cap.contains("签到") && (cap.contains("活跃") || cap.contains("宝箱") || cap.contains("双倍") || cap.contains("极速") || cap.contains("升级") || cap.contains("开宝箱"))) return true
         }
         if (Prefs.bool(Prefs.K_FLT_LIVE, false)) {
-            if (ent.javaClass.name.contains("Live", true)) return true
+            if (!isStructClsName(ent.javaClass.name) && ent.javaClass.name.contains("Live", true)) return true
             val lm = Reflect.readAny(ent, "mLivePlaybackMeta")
             if (lm != null && Reflect.readAny(lm, "mLiveStreamId") != null) return true
             if (pm != null && Reflect.readBool(pm, "mCurrentLivingState") == true) return true
